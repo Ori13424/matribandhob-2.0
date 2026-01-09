@@ -39,5 +39,4 @@ const db: Firestore = getFirestore(app);
 const rtdb: Database = getDatabase(app);
 const storage: FirebaseStorage = getStorage(app);
 export const auth = getAuth(app);
-
 export { app, db, rtdb, storage };

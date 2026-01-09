@@ -9,15 +9,17 @@ import {
   Plus, Trash2, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, 
   Check, Baby, Pill, Stethoscope
 } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 
 // --- CUSTOM UI COMPONENTS ---
 
-// 1. ULTIMATE DATE PICKER (Z-Index Fixed)
+// 1. ULTIMATE DATE PICKER
 const CustomDatePicker = ({ label, value, onChange, error }: any) => {
   const [isOpen, setIsOpen] = useState(false);
   const [viewDate, setViewDate] = useState(new Date()); 
   const [mode, setMode] = useState<'day' | 'month' | 'year'>('day');
   const pickerRef = useRef<HTMLDivElement>(null);
+  const { darkMode, toggleDarkMode } = useTheme();
 
   useEffect(() => {
     const handleClickOutside = (event: any) => {
@@ -38,7 +40,12 @@ const CustomDatePicker = ({ label, value, onChange, error }: any) => {
 
   const handleDaySelect = (day: number) => {
     const newDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day);
-    const isoDate = newDate.toLocaleDateString('en-CA'); 
+    // Use ISO format to avoid timezone issues (YYYY-MM-DD)
+    const year = newDate.getFullYear();
+    const month = String(newDate.getMonth() + 1).padStart(2, '0');
+    const d = String(day).padStart(2, '0');
+    const isoDate = `${year}-${month}-${d}`;
+    
     onChange(isoDate);
     setIsOpen(false);
   };
@@ -93,7 +100,11 @@ const CustomDatePicker = ({ label, value, onChange, error }: any) => {
                            {Array.from({ length: firstDayOfMonth(viewDate) }).map((_, i) => <div key={`empty-${i}`} />)}
                            {Array.from({ length: daysInMonth(viewDate) }).map((_, i) => {
                              const day = i + 1;
-                             const currentDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day).toLocaleDateString('en-CA');
+                             const year = viewDate.getFullYear();
+                             const month = String(viewDate.getMonth() + 1).padStart(2, '0');
+                             const d = String(day).padStart(2, '0');
+                             const currentDate = `${year}-${month}-${d}`;
+                             
                              return (
                                <button key={day} onClick={(e) => { e.stopPropagation(); handleDaySelect(day); }} className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium transition-all ${value === currentDate ? 'bg-pink-600 text-white shadow-lg' : 'text-gray-300 hover:bg-white/10'}`}>{day}</button>
                              );
@@ -119,7 +130,7 @@ const CustomDatePicker = ({ label, value, onChange, error }: any) => {
   );
 };
 
-// 2. CUSTOM SELECT (Consistent Height)
+// 2. CUSTOM SELECT
 const CustomSelect = ({ label, options, value, onChange, placeholder }: any) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -150,7 +161,7 @@ const CustomSelect = ({ label, options, value, onChange, placeholder }: any) => 
   );
 };
 
-// 3. CUSTOM INPUT (Consistent Height & Placeholder)
+// 3. CUSTOM INPUT
 const CustomInput = ({ label, value, onChange, placeholder, type = "text", icon: Icon }: any) => (
   <div className="space-y-1 relative group">
     <label className="text-xs font-bold text-gray-500 ml-1 uppercase">{label}</label>
@@ -167,7 +178,7 @@ const CustomInput = ({ label, value, onChange, placeholder, type = "text", icon:
   </div>
 );
 
-// 4. CHECKBOX GROUP (Better spacing)
+// 4. CHECKBOX GROUP
 const CheckboxGroup = ({ label, options, selected, onChange }: any) => (
   <div className="space-y-2">
     <label className="text-xs font-bold text-gray-500 ml-1 uppercase">{label}</label>
@@ -203,8 +214,19 @@ export default function OnboardingPage() {
   const [error, setError] = useState("");
   
   // State
-  const [basicInfo, setBasicInfo] = useState({ fullName: "", dob: "", bloodGroup: "", height: "", weight: "" });
-  const [pregnancyDetails, setPregnancyDetails] = useState({ status: "Pregnant", edd: "", type: "First pregnancy", prevBirths: "0", miscarriages: "0", deliveryPlan: "" });
+  const [basicInfo, setBasicInfo] = useState({ fullName: "", phone: "", dob: "", bloodGroup: "", height: "", weight: "" });
+  
+  // --- ADDED LPD TO STATE ---
+  const [pregnancyDetails, setPregnancyDetails] = useState({ 
+    status: "Pregnant", 
+    lmp: "",  // Last Period Date
+    edd: "",  // Expected Due Date
+    type: "First pregnancy", 
+    prevBirths: "0", 
+    miscarriages: "0", 
+    deliveryPlan: "" 
+  });
+  
   const [medicalHistory, setMedicalHistory] = useState({ conditions: [] as string[], complications: [] as string[] });
   const [medsAndAllergies, setMedsAndAllergies] = useState({ medications: "", supplements: [] as string[], drugAllergies: "", foodAllergies: "" });
   const [currentHealth, setCurrentHealth] = useState({ bp: "", bloodSugar: "", hemoglobin: "", symptoms: [] as string[] });
@@ -214,10 +236,11 @@ export default function OnboardingPage() {
   const validateStep = () => {
     setError("");
     if (step === 2) {
-      if (!basicInfo.fullName || !basicInfo.dob || !basicInfo.bloodGroup || !basicInfo.height || !basicInfo.weight) return "Please fill all Basic Information fields.";
+      if (!basicInfo.fullName || !basicInfo.phone || !basicInfo.dob || !basicInfo.bloodGroup || !basicInfo.height || !basicInfo.weight) return "Please fill all Basic Information fields.";
     }
     if (step === 3) {
-      if (!pregnancyDetails.edd) return "Expected Due Date is required.";
+      // Allow either LPD or EDD to be set, but preferably both logic handles it
+      if (!pregnancyDetails.edd && !pregnancyDetails.lmp) return "Please enter Last Period Date (LPD) or Expected Due Date (EDD).";
       if (!pregnancyDetails.deliveryPlan) return "Please select a Delivery Plan.";
     }
     if (step === 7) {
@@ -229,9 +252,28 @@ export default function OnboardingPage() {
   const handleNext = () => {
     const err = validateStep();
     if (err) { setError(err); return; }
-    // Scroll to top when changing steps
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setStep(prev => prev + 1);
+  };
+
+  // --- AUTO-CALCULATE EDD FROM LPD ---
+  const handleLMPChange = (date: string) => {
+    // 1. Set LPD
+    const newState = { ...pregnancyDetails, lmp: date };
+    
+    // 2. Calculate EDD (LMP + 280 days)
+    if (date) {
+        const lmpDate = new Date(date);
+        const eddDate = new Date(lmpDate.getTime() + 280 * 24 * 60 * 60 * 1000);
+        
+        // Format to YYYY-MM-DD
+        const year = eddDate.getFullYear();
+        const month = String(eddDate.getMonth() + 1).padStart(2, '0');
+        const d = String(eddDate.getDate()).padStart(2, '0');
+        
+        newState.edd = `${year}-${month}-${d}`;
+    }
+    setPregnancyDetails(newState);
   };
 
   const handleComplete = async () => {
@@ -251,13 +293,29 @@ export default function OnboardingPage() {
       }
 
       const userRef = doc(db, "users", auth.currentUser.uid);
+      const primaryContact = contacts[0] || {};
+
       await updateDoc(userRef, {
-        basicInfo,
+        basicInfo: { 
+            ...basicInfo, 
+            emergencyContact: primaryContact.phone,
+            lmp: pregnancyDetails.lmp, // Sync LMP
+            edd: pregnancyDetails.edd  // Sync EDD
+        },
+        
+        // Root Level Sync (For easy querying)
+        phone: basicInfo.phone, 
+        emergencyContact: primaryContact.phone,
+        edd: pregnancyDetails.edd,
+        lmp: pregnancyDetails.lmp,
+        
+        emergencyContacts: contacts.map(({ id, ...rest }) => rest), 
+
         pregnancyDetails: { ...pregnancyDetails, currentWeek: gestationWeek },
         medicalHistory,
         medsAndAllergies,
         currentHealth,
-        contacts: contacts.map(({ id, ...rest }) => rest),
+        
         onboardingComplete: true,
         gestationWeek,
         stage: pregnancyDetails.status === "Pregnant" ? "pregnancy" : "postpartum"
@@ -275,11 +333,10 @@ export default function OnboardingPage() {
   return (
     <div className="min-h-screen bg-[#1a0b10] text-white flex flex-col items-center p-4 font-sans relative overflow-x-hidden">
       
-      {/* Background Ambience */}
       <div className="fixed top-[-20%] right-[-10%] w-[600px] h-[600px] bg-pink-600/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-20%] left-[-10%] w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] pointer-events-none" />
 
-      {/* Progress Bar (Sticky Top) */}
+      {/* Progress Bar */}
       <div className="w-full max-w-xl sticky top-0 bg-[#1a0b10]/80 backdrop-blur-md pt-6 pb-4 z-[40]">
         <div className="flex justify-between text-[10px] font-bold text-pink-500 uppercase tracking-widest mb-2 px-1">
           <span>Start</span>
@@ -292,9 +349,10 @@ export default function OnboardingPage() {
         <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
           <motion.div className="h-full bg-gradient-to-r from-pink-500 to-rose-500" initial={{ width: "0%" }} animate={{ width: `${((step - 1) / 6) * 100}%` }} transition={{ duration: 0.5 }} />
         </div>
+
+        
       </div>
 
-      {/* Main Content Card */}
       <div className="w-full max-w-xl bg-[#2a151b]/90 backdrop-blur-xl border border-pink-500/20 rounded-3xl p-6 md:p-8 shadow-2xl relative z-10 flex flex-col mb-10 min-h-[500px]">
         
         {error && (
@@ -302,6 +360,8 @@ export default function OnboardingPage() {
             <AlertCircle className="w-4 h-4" /> {error}
           </motion.div>
         )}
+
+        
 
         <AnimatePresence mode="wait">
           
@@ -326,6 +386,10 @@ export default function OnboardingPage() {
             <motion.div key={2} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
               <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><User className="w-5 h-5"/> Basic Info</h2>
               <CustomInput label="Full Name" value={basicInfo.fullName} onChange={(v:string) => setBasicInfo({...basicInfo, fullName: v})} placeholder="Your Name" icon={User} />
+              
+              {/* PHONE NUMBER */}
+              <CustomInput label="Your Phone Number" value={basicInfo.phone} onChange={(v:string) => setBasicInfo({...basicInfo, phone: v})} placeholder="017..." icon={Phone} />
+
               <CustomDatePicker label="Date of Birth" value={basicInfo.dob} onChange={(v:string) => setBasicInfo({...basicInfo, dob: v})} />
               <CustomSelect label="Blood Group" placeholder="Select Group" options={['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']} value={basicInfo.bloodGroup} onChange={(v:string) => setBasicInfo({...basicInfo, bloodGroup: v})} />
               <div className="flex gap-4">
@@ -344,7 +408,20 @@ export default function OnboardingPage() {
                    <button key={s} onClick={() => setPregnancyDetails({...pregnancyDetails, status: s})} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${pregnancyDetails.status === s ? 'bg-pink-600 text-white' : 'text-gray-400'}`}>{s}</button>
                  ))}
               </div>
-              <CustomDatePicker label="Expected Due Date (EDD)" value={pregnancyDetails.edd} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, edd: v})} />
+              
+              {/* --- ADDED LPD (Last Period Date) & Auto-Calculation --- */}
+              <CustomDatePicker 
+                label="Last Period Date (LPD)" 
+                value={pregnancyDetails.lmp} 
+                onChange={handleLMPChange} 
+              />
+              
+              <CustomDatePicker 
+                label="Expected Due Date (EDD)" 
+                value={pregnancyDetails.edd} 
+                onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, edd: v})} 
+              />
+
               <CustomSelect label="Pregnancy Type" options={["First pregnancy", "Second pregnancy", "Third+ pregnancy"]} value={pregnancyDetails.type} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, type: v})} />
               <div className="flex gap-4">
                  <div className="flex-1"><CustomInput label="Prev Births" type="number" value={pregnancyDetails.prevBirths} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, prevBirths: v})} placeholder="0" /></div>

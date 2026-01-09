@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -7,37 +7,67 @@ import {
   Calendar, Stethoscope, FileText, Phone, CheckCircle, Clock,
   Home, Heart, User, Bot, AlertCircle
 } from "lucide-react";
+import { auth, db } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import DailyTipsCard from "./DailyTipsCard"
+import ANCJourney from "./ANCJourney";
+import ChatBotWidget from "@/features/patient/components/dashboard/ChatBotWidget"; 
+import { useTheme } from "@/context/ThemeContext";
 
-// --- MOCK DATA ---
-const upcomingAppt = {
-  doctor: "Dr. Ayesha Siddiqua",
-  specialty: "Gynecologist",
-  date: "12 Oct, 2025",
-  time: "10:30 AM",
-  hospital: "Matri Sadan, Dhaka",
-  status: "Confirmed"
-};
-
+// --- MOCK DATA FOR TIMELINE (Static for now, can be dynamic later) ---
 const ancTimeline = [
   { id: 1, title: "ANC Visit 1", weeks: "Week 16", date: "Aug 10, 2025", status: "Done" },
   { id: 2, title: "ANC Visit 2", weeks: "Week 24", date: "Oct 12, 2025", status: "Upcoming" },
   { id: 3, title: "ANC Visit 3", weeks: "Week 32", date: "Dec 05, 2025", status: "Pending" },
   { id: 4, title: "ANC Visit 4", weeks: "Week 36", date: "Jan 02, 2026", status: "Pending" },
-  { id: 5, title: "ANC Visit 5", weeks: "Week 38", date: "Feb 15, 2026", status: "Pending" },
 ];
 
 type Lang = 'en' | 'bn';
 
 export default function CarePage() {
   const router = useRouter();
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("care");
+
+  
+
   
   // --- STATES ---
-  const [darkMode, setDarkMode] = useState(true);
+  const { darkMode, toggleDarkMode } = useTheme();
   const [lang, setLang] = useState<Lang>('en');
   const [isPrivate, setIsPrivate] = useState(false); // Privacy Toggle
+  
+  // REAL DATA STATE
+  const [nextAppt, setNextAppt] = useState<any>(null);
 
   // --- HANDLERS ---
   const togglePrivacy = () => setIsPrivate(!isPrivate);
+
+  // --- FETCH NEXT APPOINTMENT ---
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // Query: Get the most recently created appointment
+        const q = query(
+            collection(db, "users", user.uid, "appointments"),
+            orderBy("createdAt", "desc"), 
+            limit(1)
+        );
+        
+        const unsubAppt = onSnapshot(q, (snapshot) => {
+            if (!snapshot.empty) {
+                const data = snapshot.docs[0].data();
+                setNextAppt(data);
+            } else {
+                setNextAppt(null);
+            }
+        });
+        return () => unsubAppt();
+      }
+    });
+    return () => unsubAuth();
+  }, []);
 
   return (
     <div className={`min-h-screen font-sans relative pb-28 transition-colors duration-500 overflow-x-hidden
@@ -64,7 +94,7 @@ export default function CarePage() {
         </div>
 
         <div className="flex items-center gap-3">
-            {/* PRIVACY TOGGLE (Purdah Mode) */}
+            {/* PRIVACY TOGGLE */}
             <button 
                 onClick={togglePrivacy}
                 className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all border relative overflow-hidden group
@@ -74,76 +104,108 @@ export default function CarePage() {
             >
                 {isPrivate ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 <span className="hidden md:inline text-xs font-bold">{isPrivate ? "Privacy ON" : "Privacy"}</span>
-            </button>
+            </button> 
+    
+            {/* THEME TOGGLE */}
+            <button 
+      onClick={toggleDarkMode} 
+      className={`p-2 rounded-full transition-all border ${
+        darkMode ? "bg-white/5 text-yellow-400" : "bg-white text-slate-500 shadow-sm"
+      }`}
+    >
+      {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+    </button>
 
-            {/* Language */}
-            <button onClick={() => setLang(lang === 'en' ? 'bn' : 'en')} className={`w-9 h-9 flex items-center justify-center text-xs font-black rounded-full border ${darkMode ? "bg-white/5 border-white/5" : "bg-white border-pink-100 text-slate-600"}`}>
-                {lang.toUpperCase()}
-            </button>
-
-            {/* Theme */}
-            <button onClick={() => setDarkMode(!darkMode)} className={`p-2.5 rounded-full border ${darkMode ? "bg-white/5 border-white/5 text-yellow-400" : "bg-white border-pink-100 text-slate-500"}`}>
-                {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
+            {/* LANGUAGE TOGGLE */}
+            <div className={`relative flex rounded-full p-1 border backdrop-blur-sm ${darkMode ? "bg-black/40 border-white/10" : "bg-white/60 border-pink-100 shadow-sm"}`}>
+                <motion.div 
+                    className="absolute top-1 bottom-1 w-[34px] bg-gradient-to-tr from-pink-600 to-purple-600 rounded-full shadow-md"
+                    initial={false}
+                    animate={{ x: lang === 'en' ? 0 : 36 }} 
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+                <button onClick={() => setLang('en')} className={`relative z-10 w-[34px] h-[26px] text-[10px] font-black rounded-full transition-colors flex items-center justify-center ${lang === 'en' ? 'text-white' : (darkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')}`}>EN</button>
+                <button onClick={() => setLang('bn')} className={`relative z-10 w-[34px] h-[26px] text-[10px] font-black rounded-full transition-colors flex items-center justify-center ${lang === 'bn' ? 'text-white' : (darkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')}`}>BN</button>
+            </div>
         </div>
       </header>
 
-      {/* --- MAIN CONTENT (Grid Layout) --- */}
+      {/* --- MAIN CONTENT --- */}
       <main className={`pt-24 px-4 md:px-8 max-w-7xl mx-auto transition-all duration-300 grid grid-cols-1 lg:grid-cols-12 gap-6
           ${isPrivate ? "blur-xl scale-95 opacity-50 pointer-events-none select-none" : ""}`}
       >
         
-        {/* LEFT COLUMN (Appt + Quick Actions) - Spans 8 cols on desktop */}
+        {/* LEFT COLUMN */}
         <div className="lg:col-span-8 flex flex-col gap-6">
             
-            {/* 1. NEXT APPOINTMENT HERO */}
+            {/* 1. DYNAMIC NEXT APPOINTMENT HERO */}
             <div className={`w-full rounded-[2.5rem] p-6 md:p-8 relative overflow-hidden shadow-xl border group min-h-[220px] flex flex-col justify-center
                 ${darkMode 
                     ? "bg-gradient-to-br from-pink-900/40 to-[#120a10] border-pink-500/20" 
                     : "bg-white border-pink-100 shadow-rose-100/50"}`}
             >
-                {/* BG Decoration */}
                 <div className="absolute top-0 right-0 p-6 opacity-10"><Calendar className="w-40 h-40" /></div>
                 
                 <div className="relative z-10 w-full md:max-w-xl">
-                    <div className="flex items-center gap-3 mb-4">
-                        <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-pink-500 text-white shadow-lg shadow-pink-500/30">
-                            Next Checkup
-                        </span>
-                        <span className={`text-sm font-bold flex items-center gap-1 ${darkMode ? "text-pink-300" : "text-pink-600"}`}>
-                            <Clock className="w-3 h-3" /> {upcomingAppt.date}
-                        </span>
-                    </div>
-                    
-                    <h2 className={`text-3xl font-bold mb-2 ${darkMode ? "text-white" : "text-slate-800"}`}>{upcomingAppt.doctor}</h2>
-                    <p className={`text-sm mb-6 flex items-center gap-2 ${darkMode ? "text-gray-400" : "text-slate-500"}`}>
-                        <Stethoscope className="w-4 h-4" /> {upcomingAppt.specialty} 
-                        <span className="opacity-30">|</span> 
-                        {upcomingAppt.hospital}
-                    </p>
+                    {nextAppt ? (
+                        <>
+                            <div className="flex items-center gap-3 mb-4">
+                                <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-pink-500 text-white shadow-lg shadow-pink-500/30">
+                                    Next Checkup
+                                </span>
+                                <span className={`text-sm font-bold flex items-center gap-1 ${darkMode ? "text-pink-300" : "text-pink-600"}`}>
+                                    <Clock className="w-3 h-3" /> {nextAppt.dateDisplay || "Upcoming"}
+                                </span>
+                            </div>
+                            
+                            <h2 className={`text-3xl font-bold mb-2 ${darkMode ? "text-white" : "text-slate-800"}`}>{nextAppt.doctorName}</h2>
+                            <p className={`text-sm mb-6 flex items-center gap-2 ${darkMode ? "text-gray-400" : "text-slate-500"}`}>
+                                <Stethoscope className="w-4 h-4" /> {nextAppt.specialty} 
+                                <span className="opacity-30">|</span> 
+                                {nextAppt.hospital}
+                            </p>
 
-                    <div className="flex gap-3">
-                        <button className="px-6 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm shadow-lg shadow-pink-600/20 hover:scale-[1.02] transition-transform flex items-center gap-2">
-                            <Phone className="w-4 h-4" /> Start Video Call
-                        </button>
-                        <button className={`px-6 py-3 rounded-xl border font-bold text-sm transition-colors ${darkMode ? "border-white/10 hover:bg-white/5" : "border-slate-200 hover:bg-slate-50 text-slate-600"}`}>
-                            View Details
-                        </button>
-                    </div>
+                            <div className="flex gap-3">
+                                <button className="px-6 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm shadow-lg shadow-pink-600/20 hover:scale-[1.02] transition-transform flex items-center gap-2">
+                                    <Phone className="w-4 h-4" /> Start Video Call
+                                </button>
+                                <button 
+                                    onClick={() => router.push("/patient/care/checkup-details")}
+                                    className={`px-6 py-3 rounded-xl border font-bold text-sm transition-colors ${darkMode ? "border-white/10 hover:bg-white/5" : "border-slate-200 hover:bg-slate-50 text-slate-600"}`}
+                                >
+                                    View Ticket
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        /* EMPTY STATE (No Appointment) */
+                        <div className="text-center md:text-left py-4">
+                            <h2 className={`text-2xl font-bold mb-2 ${darkMode ? "text-white" : "text-slate-800"}`}>No Upcoming Visits</h2>
+                            <p className={`text-sm mb-6 max-w-md ${darkMode ? "text-gray-400" : "text-slate-500"}`}>
+                                Regular checkups are vital for you and your baby's health. Book a specialist consultation today.
+                            </p>
+                            <button 
+                                onClick={() => router.push("/patient/care/find-doctor")}
+                                className="px-6 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm shadow-lg hover:scale-[1.02] transition-transform"
+                            >
+                                Book Appointment
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* 2. QUICK ACTIONS GRID (2 cols on mobile, 4 on desktop) */}
+            {/* 2. QUICK ACTIONS GRID */}
             <div>
                 <h3 className={`text-xs font-bold uppercase tracking-widest mb-4 pl-2 ${darkMode ? "text-gray-500" : "text-slate-400"}`}>Quick Care</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <ActionCard 
                         icon={Stethoscope} title="Find Doctor" subtitle="Book Specialist" 
-                        color="blue" darkMode={darkMode} onClick={() => {}} 
+                        color="blue" darkMode={darkMode} onClick={() => router.push("/patient/care/find-doctor")} 
                     />
                     <ActionCard 
                         icon={FileText} title="My Reports" subtitle="Upload & View" 
-                        color="purple" darkMode={darkMode} onClick={() => {}} 
+                        color="purple" darkMode={darkMode} onClick={() => router.push("/patient/care/my-reports")}
                     />
                     <ActionCard 
                         icon={Phone} title="Govt. Hotline" subtitle="Call 16263" 
@@ -151,73 +213,22 @@ export default function CarePage() {
                     />
                     <ActionCard 
                         icon={Calendar} title="Medicine" subtitle="Daily Log" 
-                        color="orange" darkMode={darkMode} onClick={() => {}} 
+                        color="orange" darkMode={darkMode} onClick={() => router.push("/patient/care/medicine")}
                     />
                 </div>
             </div>
 
-             {/* 4. HEALTH ALERTS (Desktop Only Filler) */}
+             {/* 3. HEALTH ALERTS */}
              <div className="hidden lg:block">
-                 <h3 className={`text-xs font-bold uppercase tracking-widest mb-4 pl-2 ${darkMode ? "text-gray-500" : "text-slate-400"}`}>Daily Tips</h3>
-                 <div className={`p-4 rounded-2xl border flex items-start gap-4 ${darkMode ? "bg-[#1e1b20]/50 border-white/5" : "bg-white border-pink-100 shadow-sm"}`}>
-                     <div className="p-3 bg-yellow-500/10 rounded-xl text-yellow-500"><AlertCircle className="w-6 h-6" /></div>
-                     <div>
-                        <h4 className={`font-bold text-sm ${darkMode ? "text-white" : "text-slate-800"}`}>Stay Hydrated!</h4>
-                        <p className={`text-xs mt-1 ${darkMode ? "text-gray-400" : "text-slate-500"}`}>Drinking 8-10 glasses of water helps maintain healthy amniotic fluid levels.</p>
-                     </div>
-                 </div>
-             </div>
+        <DailyTipsCard darkMode={darkMode} />
+    </div>
 
         </div>
 
-        {/* RIGHT COLUMN (Timeline) - Spans 4 cols on desktop */}
+        {/* RIGHT COLUMN (ANC Timeline) */}
         <div className="lg:col-span-4 h-full">
-            <h3 className={`text-xs font-bold uppercase tracking-widest mb-4 pl-2 ${darkMode ? "text-gray-500" : "text-slate-400"}`}>ANC Journey</h3>
-            <div className={`rounded-[2rem] p-6 border h-fit lg:min-h-[600px] relative overflow-hidden
-                ${darkMode ? "bg-[#1e1b20]/50 border-white/5" : "bg-white border-pink-100 shadow-sm"}`}>
-                
-                {/* Scrollable Container for Desktop */}
-                <div className="space-y-8 relative h-full">
-                    {/* Vertical Line */}
-                    <div className={`absolute left-[19px] top-2 bottom-2 w-0.5 rounded-full ${darkMode ? "bg-white/10" : "bg-slate-100"}`} />
-
-                    {ancTimeline.map((item, index) => {
-                        const isDone = item.status === "Done";
-                        const isNext = item.status === "Upcoming";
-                        
-                        return (
-                            <div key={item.id} className="relative flex gap-4 items-start group">
-                                {/* Dot Indicator */}
-                                <div className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-4 transition-all shadow-md
-                                    ${darkMode ? "border-[#1e1b20]" : "border-white"}
-                                    ${isDone ? "bg-green-500 text-white" : isNext ? "bg-pink-500 text-white animate-pulse" : (darkMode ? "bg-white/10 text-gray-500" : "bg-slate-100 text-slate-400")}`}
-                                >
-                                    {isDone ? <CheckCircle className="w-5 h-5" /> : isNext ? <Clock className="w-5 h-5" /> : <span className="text-xs font-bold">{index + 1}</span>}
-                                </div>
-
-                                {/* Content */}
-                                <div className={`flex-1 pt-1 ${!isDone && !isNext && "opacity-50"}`}>
-                                    <div className="flex justify-between items-start mb-1">
-                                        <h4 className={`font-bold text-sm ${darkMode ? "text-white" : "text-slate-800"}`}>{item.title}</h4>
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full 
-                                            ${isDone ? "bg-green-500/10 text-green-500" : isNext ? "bg-pink-500/10 text-pink-500" : "bg-gray-500/10 text-gray-500"}`}>
-                                            {item.status}
-                                        </span>
-                                    </div>
-                                    <p className={`text-xs ${darkMode ? "text-gray-400" : "text-slate-500"}`}>{item.weeks} • {item.date}</p>
-                                    
-                                    {/* Additional Details for Active Item */}
-                                    {isNext && (
-                                        <div className={`mt-3 p-3 rounded-xl text-xs border ${darkMode ? "bg-pink-500/10 border-pink-500/20 text-pink-200" : "bg-pink-50 border-pink-100 text-pink-700"}`}>
-                                            <strong>Focus:</strong> Blood pressure, Weight check, Urine test.
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
+            <ANCJourney darkMode={darkMode} />
+           
         </div>
 
       </main>
@@ -238,41 +249,69 @@ export default function CarePage() {
             </motion.div>
         )}
       </AnimatePresence>
+      
+        
+          <ChatBotWidget isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} darkMode={darkMode} />
 
       {/* --- BOTTOM NAV --- */}
       <div className="fixed bottom-6 left-0 right-0 flex justify-center z-40 px-4">
-        <nav className={`w-full max-w-lg backdrop-blur-xl border rounded-[2rem] shadow-2xl flex justify-around items-center h-20 px-2 relative transition-all duration-300
-            ${darkMode ? "bg-[#1a0b10]/95 border-white/10" : "bg-white/90 border-pink-100 shadow-rose-200/50"}`}>
-            
-            <NavButton 
-                icon={Home} 
-                label="Home" 
-                active={false} 
-                onClick={() => router.push("/patient/dashboard")} 
-                darkMode={darkMode} 
-            />
-            
-            <NavButton icon={Stethoscope} label="Care" active={true} onClick={() => {}} darkMode={darkMode} />
-
-            <div className="relative -top-6 group">
-                <div className={`w-16 h-16 bg-gradient-to-tr from-gray-500 to-slate-600 rounded-full flex items-center justify-center shadow-xl border-[6px] relative z-10 grayscale opacity-50
-                        ${darkMode ? "border-[#120a10]" : "border-[#fff5f7]"}`}
-                >
-                    <Bot className="w-7 h-7 text-white" />
-                </div>
-                <span className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold whitespace-nowrap opacity-50
-                    ${darkMode ? "text-gray-400" : "text-slate-400"}`}>Ask AI</span>
+              <nav className={`w-full max-w-lg backdrop-blur-xl border rounded-[2rem] shadow-2xl flex justify-around items-center h-20 px-2 relative transition-all duration-300
+                  ${darkMode ? "bg-[#1a0b10]/95 border-white/10" : "bg-white/90 border-pink-100 shadow-rose-200/50"}`}>
+                  
+                  <NavButton 
+                      icon={Home} 
+                      label="Home" 
+                      active={activeTab === 'home'} 
+                      onClick={() => { setActiveTab('home'); router.push("/patient/dashboard"); }} 
+                      darkMode={darkMode} 
+                  />
+      
+                  <NavButton 
+                      icon={Stethoscope} 
+                      label="Care" 
+                      active={activeTab === 'care'} 
+                      onClick={() => { setActiveTab('care'); router.push("/patient/care"); }} 
+                      darkMode={darkMode} 
+                  />
+      
+                  <div className="relative -top-6 group">
+                      <motion.button 
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => setIsChatOpen(true)}
+                          className={`w-16 h-16 bg-gradient-to-tr from-pink-600 to-purple-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(236,72,153,0.5)] border-[6px] z-50 group-hover:shadow-[0_0_40px_rgba(236,72,153,0.7)] transition-shadow duration-300 relative overflow-hidden
+                              ${darkMode ? "border-[#120a10]" : "border-[#fff5f7]"}`}
+                      >
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                          <Bot className="w-7 h-7 text-white relative z-10" />
+                      </motion.button>
+                      <span className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold transition-colors whitespace-nowrap
+                          ${darkMode ? "text-gray-400 group-hover:text-pink-400" : "text-slate-400 group-hover:text-pink-600"}`}>Ask AI</span>
+                  </div>
+                  
+                  <NavButton 
+                      icon={Heart} 
+                      label="Wellness" 
+                      active={activeTab === 'wellness'} 
+                       onClick={() => { setActiveTab('wellness'); router.push("/patient/wellness"); }} 
+                      darkMode={darkMode}
+                  />
+      
+                  <NavButton 
+                      icon={User} 
+                      label="Profile" 
+                      active={activeTab === 'profile'} 
+                      onClick={() => { setActiveTab('profile'); router.push("/patient/profile"); }} 
+                      darkMode={darkMode} 
+                  />
+              
+              </nav>
             </div>
-
-            <NavButton icon={Heart} label="Wellness" active={false} onClick={() => {}} darkMode={darkMode} />
-            <NavButton icon={User} label="Profile" active={false} onClick={() => {}} darkMode={darkMode} />
-        
-        </nav>
-      </div>
-
-    </div>
+      
+          </div>
   );
 }
+
+
 
 // --- REUSABLE COMPONENTS ---
 

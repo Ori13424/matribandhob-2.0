@@ -2,22 +2,26 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, Search, MapPin, Phone, Siren, Filter, Clock, CheckCircle } from "lucide-react";
+import { ArrowLeft, Search, MapPin, Phone, Siren, Filter, Clock, CheckCircle, Sun, Moon } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
+
+ type Lang = 'en' | 'bn';
 
 export default function BloodRequestPage() {
   const router = useRouter();
-  const [darkMode, setDarkMode] = useState(true);
+  const { darkMode, toggleDarkMode } = useTheme();
   const [activeTab, setActiveTab] = useState<'find' | 'history'>('find'); // NEW TAB STATE
   const [selectedGroup, setSelectedGroup] = useState("All");
   const [isBroadcasting, setIsBroadcasting] = useState(false);
-
+  const [lang, setLang] = useState<Lang>('en');
+   
   // Mock Donors
   const donors = [
     { id: 1, name: "Dr. Ayesha", group: "O+", distance: "1.2 km", hospital: "Matri Sadan", status: "Available" },
     { id: 2, name: "Rahim Uddin", group: "B+", distance: "3.5 km", hospital: "Community Clinic", status: "Away" },
     { id: 3, name: "City Blood Bank", group: "AB-", distance: "5.0 km", hospital: "Square Hospital", status: "Available" },
   ];
-
+  
   // NEW: Mock Request History
   const history = [
     { id: 101, type: "SOS Broadcast", status: "Resolved", date: "Today, 10:30 AM", donorsFound: 3 },
@@ -39,13 +43,74 @@ export default function BloodRequestPage() {
   return (
     <div className={`min-h-screen p-4 pb-24 font-sans ${darkMode ? "bg-[#120a10] text-white" : "bg-[#fff5f7] text-slate-900"}`}>
       
-      {/* Header */}
-      <header className="flex items-center gap-4 mb-6 pt-2">
-        <button onClick={() => router.back()} className={`p-3 rounded-full ${darkMode ? "bg-white/10 hover:bg-white/20" : "bg-white shadow-sm hover:bg-pink-100"}`}>
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h1 className="text-xl font-bold">Blood Request</h1>
-      </header>
+      <header
+  className={`flex items justify-between mb-6`}
+>
+  <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className={`p-2.5 rounded-full ${darkMode ? "bg-white/10 hover:bg-white/20" : "bg-white shadow-sm hover:bg-pink-50"}`}>
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h1 className="text-xl font-bold">Blood Bank</h1>
+        </div>
+
+  <div className="flex items-center gap-2.5">
+    <button
+      onClick={toggleDarkMode}
+      className={`p-2 rounded-full transition-all border ${
+        darkMode
+          ? "bg-white/5 text-yellow-400"
+          : "bg-white text-slate-500 shadow-sm"
+      }`}
+    >
+      {darkMode ? (
+        <Sun className="w-4.5 h-4.5" />
+      ) : (
+        <Moon className="w-4.5 h-4.5" />
+      )}
+    </button>
+
+    <div
+      className={`relative flex rounded-full p-0.5 border backdrop-blur-sm ${
+        darkMode
+          ? "bg-black/40 border-white/10"
+          : "bg-white/60 border-pink-100 shadow-sm"
+      }`}
+    >
+      <motion.div
+        className="absolute top-0.5 bottom-0.5 w-[30px] bg-gradient-to-tr from-pink-600 to-purple-600 rounded-full shadow-md"
+        initial={false}
+        animate={{ x: lang === "en" ? 0 : 32 }}
+        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+      />
+
+      <button
+        onClick={() => setLang("en")}
+        className={`relative z-10 w-[30px] h-[22px] text-[9px] font-black rounded-full flex items-center justify-center ${
+          lang === "en"
+            ? "text-white"
+            : darkMode
+            ? "text-gray-500 hover:text-gray-300"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+      >
+        EN
+      </button>
+
+      <button
+        onClick={() => setLang("bn")}
+        className={`relative z-10 w-[30px] h-[22px] text-[9px] font-black rounded-full flex items-center justify-center ${
+          lang === "bn"
+            ? "text-white"
+            : darkMode
+            ? "text-gray-500 hover:text-gray-300"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+      >
+        BN
+      </button>
+    </div>
+  </div>
+</header>
 
       {/* Tabs */}
       <div className={`flex p-1 rounded-xl mb-6 ${darkMode ? "bg-white/5" : "bg-white border border-pink-100"}`}>

@@ -2,11 +2,12 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Wallet, Plus, Building2, TrendingUp, Target, Edit2, CheckCircle } from "lucide-react";
+import { ArrowLeft, Wallet, Plus, Building2, TrendingUp, Target, Edit2, CheckCircle, Sun, Moon, Bell } from "lucide-react";
 import { doc, collection, query, orderBy, onSnapshot, setDoc, increment, serverTimestamp, limit } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-
+import { useTheme } from "@/context/ThemeContext";
+type Lang = 'en' | 'bn';
 export default function MayerBankPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -16,11 +17,13 @@ export default function MayerBankPage() {
   const [history, setHistory] = useState<any[]>([]);
   
   // UI States
-  const [darkMode, setDarkMode] = useState(true); 
+
   const [selectedAmount, setSelectedAmount] = useState(100);
   const [loading, setLoading] = useState(false);
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [customGoalInput, setCustomGoalInput] = useState("");
+  const [lang, setLang] = useState<Lang>('en'); 
+  const { darkMode, toggleDarkMode } = useTheme();
 
   // Mock Data for Hospital Costs 
   const hospitalCosts = [
@@ -103,12 +106,75 @@ export default function MayerBankPage() {
     <div className={`min-h-screen p-4 pb-24 font-sans ${darkMode ? "bg-[#120a10] text-white" : "bg-[#fff5f7] text-slate-900"}`}>
       
       {/* Header */}
-      <header className="flex items-center gap-4 mb-6 pt-2">
-        <button onClick={() => router.back()} className={`p-3 rounded-full ${darkMode ? "bg-white/10 hover:bg-white/20" : "bg-white shadow-sm hover:bg-pink-100"}`}>
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h1 className="text-xl font-bold">Mayer Bank</h1>
-      </header>
+<header
+  className={`flex items justify-between mb-6`}
+>
+  <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className={`p-2.5 rounded-full ${darkMode ? "bg-white/10 hover:bg-white/20" : "bg-white shadow-sm hover:bg-pink-50"}`}>
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h1 className="text-xl font-bold">Mayer Bank</h1>
+        </div>
+
+  <div className="flex items-center gap-2.5">
+    <button
+      onClick={toggleDarkMode}
+      className={`p-2 rounded-full transition-all border ${
+        darkMode
+          ? "bg-white/5 text-yellow-400"
+          : "bg-white text-slate-500 shadow-sm"
+      }`}
+    >
+      {darkMode ? (
+        <Sun className="w-4.5 h-4.5" />
+      ) : (
+        <Moon className="w-4.5 h-4.5" />
+      )}
+    </button>
+
+    <div
+      className={`relative flex rounded-full p-0.5 border backdrop-blur-sm ${
+        darkMode
+          ? "bg-black/40 border-white/10"
+          : "bg-white/60 border-pink-100 shadow-sm"
+      }`}
+    >
+      <motion.div
+        className="absolute top-0.5 bottom-0.5 w-[30px] bg-gradient-to-tr from-pink-600 to-purple-600 rounded-full shadow-md"
+        initial={false}
+        animate={{ x: lang === "en" ? 0 : 32 }}
+        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+      />
+
+      <button
+        onClick={() => setLang("en")}
+        className={`relative z-10 w-[30px] h-[22px] text-[9px] font-black rounded-full flex items-center justify-center ${
+          lang === "en"
+            ? "text-white"
+            : darkMode
+            ? "text-gray-500 hover:text-gray-300"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+      >
+        EN
+      </button>
+
+      <button
+        onClick={() => setLang("bn")}
+        className={`relative z-10 w-[30px] h-[22px] text-[9px] font-black rounded-full flex items-center justify-center ${
+          lang === "bn"
+            ? "text-white"
+            : darkMode
+            ? "text-gray-500 hover:text-gray-300"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+      >
+        BN
+      </button>
+    </div>
+  </div>
+</header>
+
 
       {/* Main Balance Card */}
       <div className="w-full rounded-[2.5rem] bg-gradient-to-br from-amber-600 to-yellow-600 p-8 relative overflow-hidden shadow-2xl mb-8">
