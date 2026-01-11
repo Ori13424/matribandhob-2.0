@@ -33,7 +33,7 @@ export default function PartnerSignUp() {
             role: role,
             ...(role === 'doctor' ? { bmdcNumber: formData.license } : { licenseNumber: formData.license })
         });
-        role === 'doctor' ? router.push('/dashboard') : router.push('/driver');
+        role === 'doctor' ? router.push('/doctor/dashboard') : router.push('/driver');
     } catch (error: any) {
         alert("Error: " + error.message);
     } finally {

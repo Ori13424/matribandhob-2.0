@@ -1,132 +1,144 @@
-import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI, Tool } from '@google/generative-ai';
-import { retrieveContext } from '@/lib/rag-service';
+import { NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { db } from "@/lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { RAGService } from "@/lib/rag.service"; 
+import { SiteMap } from "@/config/site-map";
 
-// Initialize Gemini
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-
-// 🚨 EMERGENCY KEYWORDS (Bipod Chinno)
-// Sourced from WHO/DGHS Danger Signs [cite: 102, 103, 106, 109, 112, 118]
-const DANGER_KEYWORDS = [
-  // Bleeding
-  'bleeding', 'blood', 'hemorrhage', 'rokto', 'rorktopat', 'spotting',
-  // Convulsions
-  'fit', 'convulsion', 'seizure', 'khichuni', 'shake', 'shaking', 'dat lege',
-  // Headache/Vision
-  'headache', 'blur', 'vision', 'matha betha', 'chokhe jhapsa', 'sorse ful',
-  // Fever
-  'fever', 'temperature', 'jor', 'gorom',
-  // Movement
-  'no movement', 'stopped moving', 'not moving', 'nora bondho', 'kome geche', 'less movement',
-  // Water Break
-  'water break', 'pani bhanga', 'fluid'
-];
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function POST(req: Request) {
+  let language = 'en'; 
+
   try {
-    if (!genAI) {
-      throw new Error("GEMINI_API_KEY is missing in .env.local");
-    }
-
     const body = await req.json();
-    const { messages, pageContext, language, image } = body;
-    
-    // 1. Get User's Latest Input
-    const userMessage = messages[messages.length - 1].content || "";
-    const userMessageLower = userMessage.toLowerCase();
+    const { message, history, userProfile, pageContext, image } = body;
+    if (body.language) language = body.language;
 
-    // 2. 🚨 SAFETY CHECK: Detect Danger Signs 
-    // If any danger keyword is present, we trigger SOS Mode.
-    const isSOS = DANGER_KEYWORDS.some(keyword => userMessageLower.includes(keyword));
+    // --- 1. RAG SEARCH (Knowledge Injection) ---
+    let ragContext = "";
+    try {
+      const searchResults = await RAGService.search(message, language);
+      if (searchResults) {
+        ragContext = `\n[VERIFIED MEDICAL DATABASE]:\n"${searchResults}"\n(Prioritize this info over general knowledge.)`;
+      }
+    } catch (e) { console.warn("RAG Search skipped"); }
 
-    // 3. RAG: Fetch Context
-    // In SOS mode, we specifically look for 'emergency' tags in our knowledge base [cite: 187]
-    const queryForRag = isSOS ? "danger emergency hospital 16263" : (userMessage || "Analyze this image");
-    const contextData = await retrieveContext(queryForRag, pageContext);
-
-    // 4. Determine Tools
-    // Disable Google Search in SOS mode to prevent distraction; force hard medical facts.
-    const tools: Tool[] | undefined = (!contextData && !isSOS) ? [{ googleSearch: {} } as Tool] : undefined;
-
-    // 5. Construct System Prompt
-    let systemInstruction = "";
-
-    if (isSOS) {
-        // --- EMERGENCY PERSONA [cite: 186, 187] ---
-        // Direct, authoritative, urgency-focused.
-        systemInstruction = `
-          You are 'Matri-Bot' in EMERGENCY MODE.
-          
-          [CRITICAL INSTRUCTION]:
-          The user has mentioned a potential DANGER SIGN (Bipod Chinno).
-          
-          1. **IMMEDIATE ACTION:** Tell them to go to the 'Upazila Health Complex' or 'District Hospital' IMMEDIATELY.
-          2. **NO DIAGNOSIS:** Do not explain *why* or ask for more symptoms. Just act.
-          3. **HELPLINE:** Tell them to call **16263** (Shastho Batayon) right now.
-          4. **TONE:** Urgent but calm. Use short, clear sentences.
-          5. **LANGUAGE:** Respond strictly in ${language === 'bn' ? 'Bangla' : 'English'}.
-          
-          [VERIFIED EMERGENCY PROTOCOLS]:
-          ${contextData}
-        `;
-    } else {
-        // --- STANDARD CARE PERSONA [cite: 14, 15] ---
-        // Gentle, "Didi" (Sister) archetype.
-        systemInstruction = `
-          You are 'Matri-Bot', a caring, motherly ('Boro Apa') medical assistant for pregnant women in rural Bangladesh.
-          
-          [PERSONA RULES]:
-          1. **No Religious Greetings:** Use "Hello", "Shagotom".
-          2. **Language:** Respond strictly in ${language === 'bn' ? 'Bangla' : 'English'}.
-          3. **Tone:** Calm, empathetic, soothing.
-          4. **Source of Truth:** Use the [LOCAL DATABASE] below strictly. If empty, use Google Search for WHO/DGHS data only.
-          5. **Taboos:** If asked about myths (pineapple, duck meat), gently correct them using the "Harm Reduction" strategy[cite: 78].
-          
-          [LOCAL DATABASE]:
-          ${contextData || "No local data found. Use Google Search if needed."}
-          
-          [USER CONTEXT]:
-          User is on the "${pageContext}" page.
-        `;
+    // --- 2. EMERGENCY SAFETY CHECK ---
+    const dangerKeywords = ["bleeding", "severe pain", "unconscious", "fainted", "heavy blood", "no movement", "convulsion"];
+    if (dangerKeywords.some(k => message.toLowerCase().includes(k))) {
+      return NextResponse.json({ 
+        reply: language === 'bn' 
+          ? "আমি জরুরি বিপদ চিহ্ন শনাক্ত করেছি। আমি এখনই SOS প্রোটোকল চালু করছি। শান্ত থাকুন এবং ডাক্তার ডাকুন।" 
+          : "I have detected a medical emergency. Activating SOS Protocol immediately. Please stay calm and call a doctor.",
+        action: "TRIGGER_SOS"
+      });
     }
 
-    // 6. Initialize Model
+    // --- 3. HISTORY SANITIZER ---
+    let validHistory = history.map((msg: any) => ({
+      role: msg.role === 'bot' ? 'model' : 'user',
+      parts: [{ text: msg.content }],
+    }));
+    // Fix Gemini 'First message must be user' error
+    if (validHistory.length > 0 && validHistory[0].role === 'model') {
+      validHistory.shift();
+    }
+
+    // --- 4. SITE AWARENESS (Navigation Map) ---
+    const siteStructure = Object.entries(SiteMap)
+      .map(([key, val]) => `- ${key}: ${val.description} (URL: ${val.url})`)
+      .join("\n");
+
+    // --- 5. SYSTEM PROMPT (The "Brain") ---
+    const systemPrompt = `
+      ROLE: You are 'Matri-Care AI', an advanced medical companion for pregnant mothers.
+      
+      USER CONTEXT:
+      - Mother: ${userProfile?.name || "Ma"} (Week ${userProfile?.week || "?"})
+      - Language: ${language === 'bn' ? "Bengali" : "English"}
+      - Current Page: ${pageContext?.url || "Home"}
+
+      CAPABILITIES & TOOLS:
+      1. **RAG Database:** Use the [VERIFIED MEDICAL DATABASE] below for answers.
+      2. **Pusti Kotha (Nutrition):** If the user asks about diet, food, or nutrition, refer them to the 'Pusti Kotha' feature (URL: /patient/wellness) AND give a short tip.
+      3. **Navigation:** You can control the app. If asked to go to "doctors", "profile", "wellness", or "SOS", return the "NAVIGATE" action with the URL from the SITE MAP below.
+      4. **Health Logging:** If the user states vitals (e.g., "My BP is 120/80", "Weight 65kg"), return "LOG_HEALTH".
+
+      SITE MAP:
+      ${siteStructure}
+
+      STRICT RULES:
+      1. **Doctor First:** After explaining ANY symptom or medicine, MUST add: "Please consult a doctor before taking action."
+      2. **Tone:** Warm, motherly, natural. NO robotic phrasing.
+      3. **Greetings:** NEUTRAL only (e.g., "Hello Ma", "Dear"). NO religious terms (No Salam/Namaskar).
+
+      ${ragContext}
+      
+      OUTPUT FORMAT (JSON ONLY):
+      {
+        "reply": "Your natural spoken response here...", 
+        "action": "NAVIGATE" | "LOG_HEALTH" | "TRIGGER_SOS" | "NONE",
+        "data": "URL string OR Health Data Object"
+      }
+    `;
+
     const model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-flash",
-        systemInstruction: systemInstruction,
-        tools: tools 
+      model: "gemini-2.5-flash",
+      generationConfig: { responseMimeType: "application/json" }
     });
 
-    // 7. Prepare Input
-    const promptParts: any[] = [];
-    if (userMessage) promptParts.push(userMessage);
-    else promptParts.push(isSOS ? "Emergency detected." : "Analyze this image.");
-
+    // --- 6. GENERATE CONTENT ---
+    let result;
     if (image) {
-        const base64Data = image.includes('base64,') ? image.split(',')[1] : image;
-        const mimeType = image.includes(':') ? image.split(':')[1].split(';')[0] : 'image/jpeg';
-        promptParts.push({
-            inlineData: { data: base64Data, mimeType: mimeType }
-        });
+      // Image Analysis Mode
+      const imagePart = {
+        inlineData: {
+          data: image.split(",")[1], 
+          mimeType: "image/jpeg"
+        }
+      };
+      result = await model.generateContent([systemPrompt, imagePart, message]);
+    } else {
+      // Text Chat Mode
+      const chat = model.startChat({ history: validHistory });
+      result = await chat.sendMessage(`${systemPrompt}\n\nUser Query: ${message}`);
     }
 
-    // 8. Generate Response
-    const result = await model.generateContent(promptParts);
-    const response = await result.response;
-    const aiResponse = response.text();
+    // --- 7. PARSE & VALIDATE RESPONSE ---
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(result.response.text());
+    } catch (e) {
+      parsedResponse = { reply: result.response.text(), action: "NONE" };
+    }
 
-    return NextResponse.json({ 
-      role: 'assistant', 
-      content: aiResponse,
-      isSOS: isSOS // 🚩 Flag sent to frontend to trigger UI Red Alert
-    });
+    // Ensure 'reply' exists (fixes "invisible message" bug)
+    const finalResponse = {
+      reply: parsedResponse.reply || parsedResponse.text || "I am processing that...", 
+      action: parsedResponse.action || "NONE",
+      data: parsedResponse.data || null
+    };
+
+    // --- 8. LOGGING (Server-Side) ---
+    if (finalResponse.action === "LOG_HEALTH" && userProfile?.uid) {
+       try {
+         await addDoc(collection(db, "users", userProfile.uid, "health_logs"), {
+          ...finalResponse.data,
+          timestamp: serverTimestamp()
+         });
+       } catch (err) { console.error("Logging failed", err); }
+    }
+
+    return NextResponse.json(finalResponse);
 
   } catch (error: any) {
-    console.error("Gemini API Error:", error.message);
-    return NextResponse.json(
-      { error: "Error", details: "I am having trouble connecting. Please try again." }, 
-      { status: 500 }
-    );
+    console.error("AI Brain Error:", error);
+    return NextResponse.json({ 
+      reply: language === 'bn' 
+        ? "দুঃখিত, সংযোগে সমস্যা হচ্ছে। আবার চেষ্টা করুন।" 
+        : "I am having trouble connecting. Please check your internet.", 
+      action: "NONE" 
+    }, { status: 500 });
   }
 }

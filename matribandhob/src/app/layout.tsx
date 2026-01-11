@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import "./globals.css"; // <--- THIS IMPORT IS CRITICAL FOR STYLES TO WORK
+import "./globals.css";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { LanguageProvider } from "@/context/LanguageContext";
+
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -10,13 +12,22 @@ export const metadata: Metadata = {
   description: "Accessible, Safe, and AI-Assisted Maternal Healthcare",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <body>
-        <ThemeProvider>
-          {children}
-        </ThemeProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className}>
+        <LanguageProvider>
+          <ThemeProvider>
+            {/* Wrap everything with PresenceWrapper to track online status globally */}
+          
+              {children}
+            
+          </ThemeProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

@@ -1,91 +1,165 @@
 "use client";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { AlertTriangle, Loader2, StopCircle, ChevronRight } from "lucide-react"; 
+import { doc, updateDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
+import { db, auth } from "@/lib/firebase";
 import { motion } from "framer-motion";
-import { ShieldAlert, Ambulance, ChevronRight } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext"; // Added Theme Context
 
-export default function SOSHomeWidget({ onQuickSOS }: { onQuickSOS?: () => void }) {
+export default function SOSHomeWidget() {
   const router = useRouter();
+  const { darkMode } = useTheme(); // Get current theme
+  
+  const [isSOSActive, setIsSOSActive] = useState(false);
+  const [locationStatus, setLocationStatus] = useState("Quick Access");
+  const [watchId, setWatchId] = useState<number | null>(null);
+  const sirenRef = useRef<HTMLAudioElement | null>(null);
 
-  // Zone 1: Quick Trigger (The "EMERGENCY" badge/button)
-  const handleQuickTrigger = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevents opening the SOS page
-    if (onQuickSOS) {
-      onQuickSOS();
+  // --- SOUND SETUP ---
+  useEffect(() => {
+    sirenRef.current = new Audio("https://cdn.pixabay.com/download/audio/2022/03/15/audio_731818292c.mp3?filename=police-siren-one-loop-23263.mp3");
+    sirenRef.current.loop = true;
+    
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      sirenRef.current?.pause();
+    };
+  }, [watchId]);
+
+  // --- NAVIGATION ---
+  const handleOpenPage = () => {
+    router.push("/patient/care/sos");
+  };
+
+  // --- QUICK SOS HANDLER ---
+  const handleQuickSOS = async (e: React.MouseEvent) => {
+    e.stopPropagation(); 
+    if (!auth.currentUser) return;
+    
+    const newState = !isSOSActive;
+    setIsSOSActive(newState);
+    const userRef = doc(db, "users", auth.currentUser.uid);
+
+    if (newState) {
+      // --- ACTIVATE ---
+      sirenRef.current?.play().catch(e => console.log("Audio Error", e));
+      setLocationStatus("Acquiring GPS...");
+      
+      await updateDoc(userRef, { sosTriggered: true, lastSOS: serverTimestamp() });
+      await addDoc(collection(db, "alerts"), {
+         patientId: auth.currentUser.uid,
+         type: "EMERGENCY_SOS",
+         status: "active",
+         timestamp: serverTimestamp()
+      });
+
+      if ("geolocation" in navigator) {
+        const id = navigator.geolocation.watchPosition(
+          async (position) => {
+            setLocationStatus("Tracking Live...");
+            await updateDoc(userRef, {
+              location: { lat: position.coords.latitude, lng: position.coords.longitude, updatedAt: serverTimestamp() }
+            });
+          },
+          () => setLocationStatus("GPS Failed"),
+          { enableHighAccuracy: true }
+        );
+        setWatchId(id);
+      }
     } else {
-      // Default behavior if no function passed: 
-      // Trigger a direct confirm or start countdown logic
-      console.log("Quick SOS Triggered");
+      // --- DEACTIVATE ---
+      sirenRef.current?.pause();
+      sirenRef.current!.currentTime = 0;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      setWatchId(null);
+      setLocationStatus("Quick Access");
+      await updateDoc(userRef, { sosTriggered: false });
     }
   };
 
-  // Zone 2: General Area (Opens SOS Page)
-  const handleOpenSOSPage = () => {
-    router.push('/patient/care/sos');
-  };
-
   return (
-    <motion.div
-      whileHover={{ scale: 1.01 }}
-      whileTap={{ scale: 0.99 }}
-      onClick={handleOpenSOSPage}
-      className="w-full h-full min-h-[160px] relative overflow-hidden group rounded-[2.5rem] cursor-pointer shadow-2xl transition-all duration-500"
+    <motion.div 
+      layout
+      onClick={handleOpenPage}
+      whileHover={{ scale: 1.02 }}
+      className={`relative w-full h-full rounded-[2.5rem] border overflow-hidden cursor-pointer group flex flex-col items-center justify-center gap-3 p-6 shadow-lg transition-all duration-500
+      ${isSOSActive 
+        ? "bg-gradient-to-br from-red-600 via-rose-600 to-red-700 border-red-500 shadow-red-900/50" 
+        : darkMode 
+          ? "bg-[#1e1b20] border-white/10 hover:border-pink-500/30" // Dark Mode Styles
+          : "bg-white/60 border-pink-100 hover:border-pink-300 hover:shadow-pink-100" // Light Mode Styles
+      }`}
     >
-      {/* 1. LAYERED BACKGROUND */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#dc2626] via-[#991b1b] to-[#7f1d1d]" />
       
-      {/* Animated Glowing Ring */}
-      <motion.div 
-        animate={{ 
-          scale: [1, 1.3, 1],
-          opacity: [0.2, 0.4, 0.2]
-        }}
-        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute -right-10 -top-10 w-40 h-40 bg-white rounded-full blur-3xl"
-      />
+      {/* Active Animation */}
+      {isSOSActive && (
+        <>
+          <motion.div 
+             animate={{ scale: [1, 2], opacity: [0.3, 0] }}
+             transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+             className="absolute inset-0 bg-white rounded-[2.5rem] z-0"
+          />
+          <motion.div 
+             animate={{ opacity: [0, 0.2, 0] }}
+             transition={{ repeat: Infinity, duration: 0.5 }}
+             className="absolute inset-0 bg-red-400 mix-blend-overlay z-0"
+          />
+        </>
+      )}
 
-      <div className="absolute inset-0 bg-white/5 backdrop-blur-[1px]" />
-
-      {/* 2. CONTENT LAYOUT */}
-      <div className="relative z-10 flex flex-col h-full p-6 justify-between">
-        
-        <div className="flex justify-between items-start">
-          <div className="flex flex-col gap-2">
-            {/* QUICK TRIGGER BUTTON */}
-            <motion.button 
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handleQuickTrigger}
-              className="px-3 py-1.5 rounded-full bg-white text-red-700 shadow-lg flex items-center gap-2 border border-white/50"
-            >
-              <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-              <span className="text-[10px] font-black uppercase tracking-tighter">Emergency</span>
-            </motion.button>
-            
-            <h3 className="text-4xl font-black text-white tracking-tighter drop-shadow-lg">
-              SOS
-            </h3>
-          </div>
-
-          <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20 shadow-inner group-hover:bg-white/20 transition-all">
-            <ShieldAlert className="w-7 h-7 text-white" />
-          </div>
-        </div>
-
-        <div className="flex items-end justify-between">
-          <div className="flex items-center gap-3 text-white/60">
-             <Ambulance className="w-5 h-5 opacity-50" />
-             <div className="w-1 h-1 rounded-full bg-white/30" />
-             <span className="text-xs font-black tracking-widest uppercase">16263</span>
-          </div>
-
-          <div className="p-2 bg-white/10 text-white rounded-full backdrop-blur-md group-hover:bg-white/20 transition-colors">
+      {/* Arrow Icon */}
+      {!isSOSActive && (
+        <div className={`absolute top-4 right-4 transition-colors z-10 ${darkMode ? "text-slate-600 group-hover:text-pink-400" : "text-pink-200 group-hover:text-pink-500"}`}>
             <ChevronRight className="w-5 h-5" />
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* MESH TEXTURE */}
-      <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(circle_at_2px_2px,rgba(255,255,255,0.15)_1px,transparent_0)] bg-[length:10px_10px]" />
+      {/* QUICK ACTION BUTTON */}
+      <motion.button 
+        whileTap={{ scale: 0.9 }}
+        onClick={handleQuickSOS}
+        className={`w-24 h-24 rounded-full flex items-center justify-center shadow-inner z-10 relative transition-colors
+          ${isSOSActive 
+            ? "bg-white text-red-600" 
+            : darkMode 
+              ? "bg-[#120a10] text-red-500 border border-white/5 hover:bg-white/5" 
+              : "bg-red-50 text-red-500 hover:bg-red-100 border border-red-100"}`}
+      >
+        {isSOSActive ? (
+          <StopCircle className="w-10 h-10 animate-bounce" />
+        ) : (
+          <AlertTriangle className="w-10 h-10" />
+        )}
+      </motion.button>
+
+      {/* TEXT CONTENT */}
+      <div className="text-center z-10">
+        <h3 className={`font-black text-xl uppercase tracking-wider transition-colors
+           ${isSOSActive ? "text-white" : darkMode ? "text-slate-200" : "text-slate-800"}`}>
+          {isSOSActive ? "SOS ACTIVE" : "Emergency"}
+        </h3>
+        
+        <p className={`text-xs font-medium mt-1 flex items-center justify-center gap-1 transition-colors
+           ${isSOSActive ? "text-red-100" : darkMode ? "text-slate-500" : "text-slate-400"}`}>
+          {locationStatus === "Tracking Live..." && <Loader2 className="w-3 h-3 animate-spin" />}
+          {locationStatus}
+        </p>
+      </div>
+      
+      {isSOSActive ? (
+         <motion.p 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="absolute bottom-4 text-[10px] text-white/90 font-bold uppercase tracking-widest z-10"
+         >
+            Tap Icon to Stop
+         </motion.p>
+      ) : (
+         <p className={`absolute bottom-4 text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity z-10
+            ${darkMode ? "text-slate-500" : "text-slate-400"}`}>
+            Tap card for details
+         </p>
+      )}
     </motion.div>
   );
 }

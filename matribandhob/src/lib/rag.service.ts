@@ -1,8 +1,6 @@
 // ==============================================================================
 // 🏥 MATRI-CARE KNOWLEDGE BASE (SOURCE: Matri-Bot Research PDF)
 // ==============================================================================
-// This database is the "Ground Truth". The AI prioritizes this over general knowledge.
-// ==============================================================================
 
 export type KnowledgeChunk = {
   id: string;
@@ -111,7 +109,7 @@ const KNOWLEDGE_BASE: KnowledgeChunk[] = [
     category: 'general',
     tags: ['sleep', 'rest', 'position', 'left side'],
     content_en: "A pregnant mother works for two. Sleep 8 hours at night and rest 2 hours in the day. Lie on your left side when resting. This improves blood flow to the baby and reduces leg swelling.",
-    content_bn: "গর্ভবতী মা দুজনের জন্য খাটেন। তাই রাতে ৮ ঘণ্টা এবং দিনে ২ ঘণ্টা বিশ্রাম নিন। বিশ্রাম বা ঘুমানোর সময় বাঁ-কাত হয়ে শোবেন। এতে বাচ্চার শরীরে রক্ত সঞ্চালন বাড়ে এবং আপনার পায়ে পানি আসা কমে।"
+    content_bn: "গর্ভবতী মা দুজনের জন্য খাটেন। তাই রাতে ৮ ঘণ্টা এবং দিনে ২ ঘণ্টা বিশ্রাম নিন। বিশ্রাম বা ঘুমানোর সময় বাঁ-কাত হয়ে শুয়ে পড়ুন। এতে বাচ্চার শরীরে রক্ত সঞ্চালন বাড়ে এবং আপনার পায়ে পানি আসা কমে।"
   },
   {
     id: 'HYG_03',
@@ -126,38 +124,22 @@ const KNOWLEDGE_BASE: KnowledgeChunk[] = [
 // 🧠 RETRIEVAL LOGIC
 // ==============================================================================
 
-export async function retrieveContext(userQuery: string, pageContext: string): Promise<string> {
-  const query = userQuery.toLowerCase();
-  
-  // 1. FILTERING: Prioritize content based on Page Context
-  let activeKnowledge = KNOWLEDGE_BASE;
-  
-  if (pageContext.includes('nutrition')) {
-    activeKnowledge = [
-      ...KNOWLEDGE_BASE.filter(k => k.category === 'nutrition' || k.category === 'myth_busting'),
-      ...KNOWLEDGE_BASE.filter(k => k.category !== 'nutrition' && k.category !== 'myth_busting')
-    ];
-  } else if (pageContext.includes('care') || pageContext.includes('hospital')) {
-    activeKnowledge = [
-      ...KNOWLEDGE_BASE.filter(k => k.category === 'emergency' || k.category === 'medicine'),
-      ...KNOWLEDGE_BASE.filter(k => !['emergency', 'medicine'].includes(k.category))
-    ];
+export const RAGService = {
+  async search(query: string, language: string): Promise<string | null> {
+    const lowerQuery = query.toLowerCase();
+    
+    // Find relevant medical info based on TAGS
+    const result = KNOWLEDGE_BASE.find(item => 
+      item.tags.some(tag => lowerQuery.includes(tag))
+    );
+
+    if (result) {
+      // Use the dedicated language content fields
+      return language === 'bn' 
+        ? `[Medical Database]: ${result.content_bn}` 
+        : `[Medical Database]: ${result.content_en}`;
+    }
+    
+    return null;
   }
-
-  // 2. KEYWORD MATCHING
-  const relevantChunks = activeKnowledge.filter(chunk => {
-    return chunk.tags.some(tag => query.includes(tag)) || 
-           chunk.content_en.toLowerCase().includes(query) ||
-           chunk.content_bn.includes(query);
-  });
-
-  // 3. RETURN CONTEXT
-  if (relevantChunks.length > 0) {
-    // Limit to top 3 chunks to prevent token overflow
-    return relevantChunks.slice(0, 3).map(chunk => 
-      `[TOPIC: ${chunk.category.toUpperCase()}]\n(EN): ${chunk.content_en}\n(BN): ${chunk.content_bn}`
-    ).join("\n\n---\n\n");
-  }
-
-  return ""; // Return empty string if no local data found (Triggering Google Search in Route)
-}
+};

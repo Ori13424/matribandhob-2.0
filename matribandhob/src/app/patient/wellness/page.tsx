@@ -40,6 +40,7 @@ export default function WellnessPage() {
 
   // --- WELLNESS DATA ---
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [hasLoggedMoodToday, setHasLoggedMoodToday] = useState(false); // New state for locking input
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
   const [showDangerAlert, setShowDangerAlert] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -59,7 +60,10 @@ export default function WellnessPage() {
         const logSnap = await getDoc(doc(db, "users", user.uid, "dailyLogs", dateKey));
         if (logSnap.exists()) {
             const data = logSnap.data();
-            if (data.mood) setSelectedMood(data.mood);
+            if (data.mood) {
+                setSelectedMood(data.mood);
+                setHasLoggedMoodToday(true); // Lock input if mood exists
+            }
             if (data.symptoms) setSelectedSymptoms(data.symptoms);
         }
 
@@ -73,7 +77,11 @@ export default function WellnessPage() {
 
   // --- HANDLERS ---
   const handleMoodSelect = async (mood: Mood) => {
+    if (hasLoggedMoodToday) return; // Prevent change if already logged
+
     setSelectedMood(mood);
+    setHasLoggedMoodToday(true); // Lock UI immediately
+
     if (auth.currentUser) {
         const dateKey = new Date().toISOString().split('T')[0];
         await setDoc(doc(db, "users", auth.currentUser.uid, "dailyLogs", dateKey), {
@@ -134,13 +142,13 @@ export default function WellnessPage() {
         <div className="flex items-center gap-3">
             {/* THEME TOGGLE */}
             <button 
-      onClick={toggleDarkMode} 
-      className={`p-2 rounded-full transition-all border ${
-        darkMode ? "bg-white/5 text-yellow-400" : "bg-white text-slate-500 shadow-sm"
-      }`}
-    >
-      {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-    </button>
+              onClick={toggleDarkMode} 
+              className={`p-2 rounded-full transition-all border ${
+                darkMode ? "bg-white/5 text-yellow-400" : "bg-white text-slate-500 shadow-sm"
+              }`}
+            >
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
 
             {/* LANGUAGE TOGGLE */}
             <div className={`relative flex rounded-full p-1 border backdrop-blur-sm ${darkMode ? "bg-black/40 border-white/10" : "bg-white/60 border-pink-100 shadow-sm"}`}>
@@ -166,12 +174,39 @@ export default function WellnessPage() {
                 <p className={`text-sm ${darkMode ? "text-gray-400" : "text-slate-500"}`}>Track your mental well-being daily</p>
             </div>
             
-            <div className="flex flex-wrap justify-center gap-4">
-                <MoodBtn mood="Happy" icon={Smile} color="text-yellow-500" active={selectedMood === 'Happy'} onClick={() => handleMoodSelect('Happy')} darkMode={darkMode} />
-                <MoodBtn mood="Neutral" icon={Meh} color="text-blue-500" active={selectedMood === 'Neutral'} onClick={() => handleMoodSelect('Neutral')} darkMode={darkMode} />
-                <MoodBtn mood="Tired" icon={CloudRain} color="text-gray-500" active={selectedMood === 'Tired'} onClick={() => handleMoodSelect('Tired')} darkMode={darkMode} />
-                <MoodBtn mood="Sad" icon={Frown} color="text-purple-500" active={selectedMood === 'Sad'} onClick={() => handleMoodSelect('Sad')} darkMode={darkMode} />
-            </div>
+            {hasLoggedMoodToday ? (
+                // --- LOCKED STATE UI ---
+                <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`p-8 rounded-[2rem] border flex flex-col items-center gap-4 max-w-sm mx-auto
+                    ${darkMode ? "bg-white/5 border-white/10" : "bg-white border-pink-100 shadow-sm"}`}
+                >
+                    <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-pink-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-pink-500/30">
+                        <CheckCircle className="w-8 h-8" />
+                    </div>
+                    <div>
+                        <h3 className={`text-xl font-bold ${darkMode ? "text-white" : "text-slate-800"}`}>
+                            Check-in Complete
+                        </h3>
+                        <p className={`text-sm mt-2 ${darkMode ? "text-gray-400" : "text-slate-500"}`}>
+                            You're feeling <span className="font-bold text-pink-500">{selectedMood}</span> today.
+                            <br />Your mood log has been saved.
+                        </p>
+                    </div>
+                    <div className={`text-xs px-4 py-2 rounded-full font-medium ${darkMode ? "bg-white/10 text-gray-400" : "bg-slate-100 text-slate-500"}`}>
+                        Updates enabled tomorrow
+                    </div>
+                </motion.div>
+            ) : (
+                // --- ACTIVE INPUT STATE UI ---
+                <div className="flex flex-wrap justify-center gap-4">
+                    <MoodBtn mood="Happy" icon={Smile} color="text-yellow-500" active={selectedMood === 'Happy'} onClick={() => handleMoodSelect('Happy')} darkMode={darkMode} />
+                    <MoodBtn mood="Neutral" icon={Meh} color="text-blue-500" active={selectedMood === 'Neutral'} onClick={() => handleMoodSelect('Neutral')} darkMode={darkMode} />
+                    <MoodBtn mood="Tired" icon={CloudRain} color="text-gray-500" active={selectedMood === 'Tired'} onClick={() => handleMoodSelect('Tired')} darkMode={darkMode} />
+                    <MoodBtn mood="Sad" icon={Frown} color="text-purple-500" active={selectedMood === 'Sad'} onClick={() => handleMoodSelect('Sad')} darkMode={darkMode} />
+                </div>
+            )}
         </div>
 
         {/* 2. SYMPTOM CHECKLIST */}

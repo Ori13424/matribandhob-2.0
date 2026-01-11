@@ -136,7 +136,7 @@ export default function SOSPage() {
                 <div>
                     <h3 className="font-black text-red-500 text-sm uppercase">Emergency Active</h3>
                     <p className={`text-xs mt-1 font-medium leading-relaxed ${darkMode ? "text-gray-300" : "text-slate-600"}`}>
-                        Seeking help for danger signs like bleeding or labor. [cite: 21, 23]
+                        Seeking help for danger signs like bleeding or labor. Stay calm and wait for assistance.
                     </p>
                 </div>
             </div>

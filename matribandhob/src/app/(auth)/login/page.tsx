@@ -115,7 +115,7 @@ export default function LoginPage() {
         }
       } 
       
-      if (userRole === 'doctor') return router.push('/dashboard');
+      if (userRole === 'doctor') return router.push('/doctor/dashboard');
       if (userRole === 'driver') return router.push('/driver');
 
     } catch (err: any) {
