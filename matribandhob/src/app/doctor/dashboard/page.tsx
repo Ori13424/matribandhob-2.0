@@ -14,7 +14,8 @@ import { Users, Truck, Map, X, Bell, AlertTriangle } from "lucide-react";
 
 // Components
 import DoctorDashboardLoader from "@/features/doctor/components/DoctorDashboardLoader";
-import DoctorStatsWidget from "@/features/doctor/components/DoctorStatsWidget"; 
+// --- 1. IMPORT THE TYPE HERE ---
+import DoctorStatsWidget, { LiveStatsData } from "@/features/doctor/DoctorStatsWidget"; 
 import PatientWaitingRoom from "@/features/doctor/components/PatientWaitingRoom";
 import AddPatientModal from "@/features/doctor/components/patients/AddPatientModal";
 
@@ -22,12 +23,6 @@ const PatientMap = dynamic(
   () => import("@/features/doctor/components/patients/PatientMap"), 
   { ssr: false, loading: () => <div className="h-full w-full bg-slate-100 animate-pulse flex items-center justify-center">Loading...</div> }
 );
-
-// Define Interface
-interface LiveStats {
-  activeMothers: number;
-  onlineDoctors: number;
-}
 
 // Helper to normalize array
 const normalizeList = (input: any) => {
@@ -44,7 +39,8 @@ export default function DoctorDashboard() {
   // Data States
   const [loading, setLoading] = useState(true); 
   const [patients, setPatients] = useState<any[]>([]);
-  const [liveStats, setLiveStats] = useState<LiveStats>({ activeMothers: 0, onlineDoctors: 0 }); 
+  // --- 2. USE THE IMPORTED TYPE HERE ---
+  const [liveStats, setLiveStats] = useState<LiveStatsData>({ activeMothers: 0, onlineDoctors: 0 }); 
   
   // Notification States
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -134,12 +130,10 @@ export default function DoctorDashboard() {
                 const data = doc.data();
                 
                 // --- EXCLUSION LOGIC START ---
-                // Do not include doctors in the patient list
                 if (data.role === 'doctor') {
                     if (data.isOnline === true) onlineDocs++;
                     return null;
                 }
-                // Do not include drivers in the patient list
                 if (data.role === 'driver') {
                     return null;
                 }

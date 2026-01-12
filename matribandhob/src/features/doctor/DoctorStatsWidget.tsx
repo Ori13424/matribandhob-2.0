@@ -2,13 +2,15 @@
 import { Users, Activity, AlertCircle, Stethoscope } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
-// --- FIX: Define the props interface so TypeScript knows what 'liveStats' is ---
+// --- 1. EXPORT INTERFACE so page.tsx can import it ---
+export interface LiveStatsData {
+  activeMothers: number;
+  onlineDoctors: number;
+}
+
 interface DoctorStatsProps {
   patients: any[];
-  liveStats?: {
-    activeMothers: number;
-    onlineDoctors: number;
-  };
+  liveStats?: LiveStatsData; 
 }
 
 export default function DoctorStatsWidget({ patients, liveStats }: DoctorStatsProps) {
