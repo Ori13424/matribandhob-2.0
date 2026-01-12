@@ -4,7 +4,7 @@ import { collection, query, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import dynamic from "next/dynamic"; // Required for Map to work
+import dynamic from "next/dynamic";
 
 // --- COMPONENTS ---
 import PatientPageHeader from "@/features/doctor/components/patients/PatientPageHeader";
@@ -14,8 +14,6 @@ import PatientLocationModal from "@/features/doctor/components/patients/PatientL
 import AddPatientModal from "@/features/doctor/components/patients/AddPatientModal";
 import DoctorChatDrawer from "@/features/doctor/components/patients/DoctorChatDrawer";
 
-// --- DYNAMIC MAP IMPORT ---
-// We must disable SSR (Server Side Rendering) for Leaflet Map
 const PatientMap = dynamic(
   () => import("@/features/doctor/components/patients/PatientMap"), 
   { ssr: false, loading: () => <div className="h-[600px] bg-slate-100 animate-pulse rounded-3xl w-full flex items-center justify-center text-slate-400">Loading Map...</div> }
@@ -43,7 +41,10 @@ export default function MyPatientsPage() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => {
         const d = doc.data();
-        if (d.role === 'doctor') return null;
+        
+        // --- EXCLUSION LOGIC ---
+        // Exclude Doctors AND Drivers
+        if (d.role === 'doctor' || d.role === 'driver') return null;
         
         let status = "Normal"; 
         let statusColor = "green";
@@ -60,11 +61,8 @@ export default function MyPatientsPage() {
           bloodGroup: d.basicInfo?.bloodGroup || "--",
           lastActive: d.lastActive ? "Recently" : "Inactive",
           isOnline: d.isOnline || false,
-          
-          // CRITICAL: Ensure these fields are passed for the Map
           location: d.location || null, 
-          sosTriggered: d.sosTriggered === true, // Force boolean
-          
+          sosTriggered: d.sosTriggered === true,
           status, 
           statusColor
         };
@@ -82,6 +80,12 @@ export default function MyPatientsPage() {
     const doc = new jsPDF();
     doc.text("Matri-Bandhob Patient List", 14, 15);
     
+    // Filter logic needs to be accessed here or duplicated
+    const filteredPatients = patients.filter(p => {
+        const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.id.includes(search);
+        return matchesSearch;
+    });
+
     const tableData = filteredPatients.map(p => [
       p.name,
       p.week + " Weeks",
@@ -118,22 +122,16 @@ export default function MyPatientsPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      
-      {/* HEADER */}
       <PatientPageHeader 
         {...stats}
         onAddPatient={() => setIsAddModalOpen(true)}
         onExport={handleExport}
       />
-
-      {/* FILTERS */}
       <PatientFilters 
         search={search} setSearch={setSearch}
         riskFilter={riskFilter} setRiskFilter={setRiskFilter}
         viewMode={viewMode} setViewMode={setViewMode}
       />
-
-      {/* --- CONDITIONAL VIEW (List vs Map) --- */}
       {viewMode === 'list' ? (
         <PatientListTable 
           patients={filteredPatients}
@@ -145,27 +143,9 @@ export default function MyPatientsPage() {
            <PatientMap patients={filteredPatients} />
         </div>
       )}
-
-      {/* --- MODALS --- */}
-      {selectedPatientLocation && (
-        <PatientLocationModal 
-          patient={selectedPatientLocation} 
-          onClose={() => setSelectedPatientLocation(null)} 
-        />
-      )}
-
-      {isAddModalOpen && (
-        <AddPatientModal 
-          onClose={() => setIsAddModalOpen(false)} 
-        />
-      )}
-
-      {selectedChatPatient && (
-        <DoctorChatDrawer 
-          patient={selectedChatPatient} 
-          onClose={() => setSelectedChatPatient(null)} 
-        />
-      )}
+      {selectedPatientLocation && <PatientLocationModal patient={selectedPatientLocation} onClose={() => setSelectedPatientLocation(null)} />}
+      {isAddModalOpen && <AddPatientModal onClose={() => setIsAddModalOpen(false)} />}
+      {selectedChatPatient && <DoctorChatDrawer patient={selectedChatPatient} onClose={() => setSelectedChatPatient(null)} />}
     </div>
   );
 }

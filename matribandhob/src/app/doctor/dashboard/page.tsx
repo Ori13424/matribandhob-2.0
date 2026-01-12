@@ -64,43 +64,32 @@ export default function DoctorDashboard() {
   }, []);
 
   // --- 1. GLOBAL MONITOR: DETECT CRITICAL SYMPTOMS (Bleeding/Fever) ---
-  // This listens to ALL patients' logs in real-time without visiting their profile
   useEffect(() => {
-    // 1. Calculate 24h ago timestamp to only check recent logs
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // 2. Query ALL 'dailyLogs' collections in the entire DB
     const qGlobalLogs = query(
         collectionGroup(db, 'dailyLogs'),
         where('lastUpdated', '>=', oneDayAgo)
-        // Note: You might need to create an index in Firestore Console for this query.
-        // Check your browser console; if it asks for an index, click the link provided.
     );
 
     const unsubGlobal = onSnapshot(qGlobalLogs, async (snapshot) => {
-        // Iterate through changed docs only
         for (const change of snapshot.docChanges()) {
             if (change.type === 'added' || change.type === 'modified') {
                 const logData = change.doc.data();
                 const logId = change.doc.id;
-                // Get Patient ID from the parent document reference (users/{id}/dailyLogs/{logId})
                 const patientId = change.doc.ref.parent.parent?.id;
 
                 if (!patientId || !auth.currentUser) continue;
 
-                // A. Check for Keywords
                 const symptoms = normalizeList(logData.symptoms).map(s => String(s).toLowerCase());
                 const criticalSymptoms = symptoms.filter(s => s.includes('bleeding') || s.includes('fever'));
                 const hasCriticalCondition = criticalSymptoms.length > 0;
 
-                // B. Check if notification ALREADY exists
                 const notifQuery = query(collection(db, "notifications"), where("relatedLogId", "==", logId));
                 const notifSnap = await getDocs(notifQuery);
 
                 if (hasCriticalCondition) {
-                    // C. IF Critical AND No Notification -> Create It
                     if (notifSnap.empty) {
-                        // Fetch Patient Name needed for the alert
                         const pDoc = await getDoc(doc(db, "users", patientId));
                         const pData = pDoc.exists() ? pDoc.data() : {};
                         const pName = pData.basicInfo?.fullName || pData.fullName || "Patient";
@@ -117,13 +106,10 @@ export default function DoctorDashboard() {
                             relatedLogId: logId,
                             link: `/doctor/patients/${patientId}`
                         });
-                        console.log("Global Monitor: Alert Sent");
                     }
                 } else {
-                    // D. IF NOT Critical (Removed?) AND Notification Exists -> Delete It
                     if (!notifSnap.empty) {
                         notifSnap.forEach(async (d) => await deleteDoc(d.ref));
-                        console.log("Global Monitor: Alert Resolved");
                     }
                 }
             }
@@ -147,10 +133,18 @@ export default function DoctorDashboard() {
             const patientData = await Promise.all(snapshot.docs.map(async (doc) => {
                 const data = doc.data();
                 
+                // --- EXCLUSION LOGIC START ---
+                // Do not include doctors in the patient list
                 if (data.role === 'doctor') {
                     if (data.isOnline === true) onlineDocs++;
                     return null;
                 }
+                // Do not include drivers in the patient list
+                if (data.role === 'driver') {
+                    return null;
+                }
+                // --- EXCLUSION LOGIC END ---
+
                 if (data.lastActive?.toDate() > oneDayAgo) {
                     activeMoms++;
                 }
