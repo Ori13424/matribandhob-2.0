@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+// Adjust these paths based on your folder structure
 import { useAuthStore } from "../logic/useAuthStore";
 import { UserProfile } from "../logic/authService";
 
@@ -21,7 +22,8 @@ export function useAuthListener() {
             const profile = userSnap.data() as UserProfile;
             setUser(currentUser, profile);
           } else {
-            // Profile missing? Set basic user data
+            // Profile missing? Set basic user data but null profile
+            // Or you could trigger a "finish registration" flow here
             setUser(currentUser, null);
           }
         } catch (error) {

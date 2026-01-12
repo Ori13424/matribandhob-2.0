@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { User } from 'firebase/auth';
-import { UserProfile } from './authService';
+import { UserProfile } from './authService'; // This import now works
 
 interface AuthState {
   user: User | null;
