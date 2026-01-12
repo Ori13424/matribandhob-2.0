@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
-import { ArrowRight, Activity, ShieldCheck, Truck, User, X, CheckCircle, Info, Loader2 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { ArrowRight, Activity, ShieldCheck, Truck, User, X, CheckCircle, Info } from "lucide-react";
+import { motion, AnimatePresence, Variants } from "framer-motion"; // Added Variants type
 import { useState, useEffect } from "react";
 import Footer from "@/components/Footer"; 
 
-// --- CUSTOM TOAST SYSTEM TYPES ---
+// --- TYPES ---
 type ToastType = "success" | "info" | "error";
 interface Toast {
   id: number;
@@ -13,13 +13,33 @@ interface Toast {
   type: ToastType;
 }
 
+// --- ANIMATION VARIANTS (Moved outside component for stability) ---
+const containerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { 
+    opacity: 1, 
+    transition: { 
+      staggerChildren: 0.1,
+      delayChildren: 0.3 
+    } 
+  }
+};
+
+const itemVariants: Variants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: { 
+    y: 0, 
+    opacity: 1, 
+    transition: { type: "spring", stiffness: 80 } 
+  }
+};
+
 export default function LandingPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // --- HANDLE LOADING STATE ---
   useEffect(() => {
-    // Simulate asset loading / intro animation time
     const timer = setTimeout(() => {
       setIsLoading(false);
     }, 2200); 
@@ -37,17 +57,6 @@ export default function LandingPage() {
 
   const removeToast = (id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  // Animation Variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
-  };
-
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 80 } }
   };
 
   return (
@@ -176,13 +185,13 @@ export default function LandingPage() {
             </motion.p>
 
             <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              {/* FIXED: Default to Mother registration for Get Started */}
+              {/* FIXED: Changed <button> to <span> to avoid nesting error inside Link */}
               <Link href="/register?role=mother">
-                <button 
-                  className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold transition-all flex items-center gap-2 shadow-lg shadow-blue-900/30 hover:shadow-blue-600/40 active:scale-95"
+                <span 
+                  className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold transition-all flex items-center gap-2 shadow-lg shadow-blue-900/30 hover:shadow-blue-600/40 active:scale-95 cursor-pointer"
                 >
                   Get Started <ArrowRight className="w-5 h-5" />
-                </button>
+                </span>
               </Link>
               <button 
                 onClick={() => showToast("Read more about our mission on the About page!", "info")}
@@ -214,7 +223,7 @@ export default function LandingPage() {
             {/* BENTO GRID LAYOUT */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 
-                {/* 1. Mother Card -> FIXED LINK */}
+                {/* 1. Mother Card */}
                 <RoleCard 
                   href="/register?role=mother"
                   title="Mother"
@@ -227,7 +236,7 @@ export default function LandingPage() {
                   delay={0}
                 />
 
-                {/* 2. Doctor Card -> FIXED LINK */}
+                {/* 2. Doctor Card */}
                 <RoleCard 
                   href="/register?role=doctor"
                   title="Doctor"
@@ -240,7 +249,7 @@ export default function LandingPage() {
                   delay={0.1}
                 />
 
-                {/* 3. Driver Card -> FIXED LINK */}
+                {/* 3. Driver Card */}
                 <RoleCard 
                   href="/register?role=driver"
                   title="Ambulance"
@@ -288,12 +297,26 @@ function CustomToast({ message, type, onClose }: { message: string, type: ToastT
     );
 }
 
-function RoleCard({ href, title, subtitle, desc, icon, gradient, borderHover, iconBg, delay }: any) {
+// Fixed 'any' type to be more explicit for RoleCard props
+interface RoleCardProps {
+    href: string;
+    title: string;
+    subtitle: string;
+    desc: string;
+    icon: React.ReactNode;
+    gradient: string;
+    borderHover: string;
+    iconBg: string;
+    delay: number;
+}
+
+function RoleCard({ href, title, subtitle, desc, icon, gradient, borderHover, iconBg, delay }: RoleCardProps) {
   return (
     <Link href={href} className="block h-full">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
           transition={{ delay, duration: 0.5 }}
           whileHover={{ y: -5 }}
           className={`group relative h-full bg-[#0B1221] border border-gray-800 rounded-3xl overflow-hidden hover:shadow-2xl transition-all duration-300 ${borderHover}`}
