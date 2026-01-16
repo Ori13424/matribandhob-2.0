@@ -4,17 +4,16 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion"; 
 import { 
   collection, query, orderBy, limit, onSnapshot, getDocs, where, updateDoc, doc, 
-  collectionGroup, getDoc, addDoc, deleteDoc, serverTimestamp 
+  collectionGroup, getDoc, addDoc, deleteDoc, serverTimestamp, writeBatch 
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { useTheme } from "@/context/ThemeContext";
 import dynamic from "next/dynamic"; 
-import { Users, Truck, Map, X, Bell, AlertTriangle } from "lucide-react"; 
+import { Users, Truck, Map, X, Bell, AlertTriangle, CheckCircle, Trash2, AlertOctagon } from "lucide-react"; 
 
 // Components
 import DoctorDashboardLoader from "@/features/doctor/components/DoctorDashboardLoader";
-// --- 1. IMPORT THE TYPE HERE ---
 import DoctorStatsWidget, { LiveStatsData } from "@/features/doctor/DoctorStatsWidget"; 
 import PatientWaitingRoom from "@/features/doctor/components/PatientWaitingRoom";
 import AddPatientModal from "@/features/doctor/components/patients/AddPatientModal";
@@ -39,27 +38,33 @@ export default function DoctorDashboard() {
   // Data States
   const [loading, setLoading] = useState(true); 
   const [patients, setPatients] = useState<any[]>([]);
-  // --- 2. USE THE IMPORTED TYPE HERE ---
   const [liveStats, setLiveStats] = useState<LiveStatsData>({ activeMothers: 0, onlineDoctors: 0 }); 
   
   // Notification States
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const [clearing, setClearing] = useState(false); 
+
+  // Modal & Confirmation States
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isMapOpen, setIsMapOpen] = useState(false); 
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    type: 'sos' | 'clear_notifs' | null;
+    title: string;
+    message: string;
+  }>({ isOpen: false, type: null, title: "", message: "" });
 
   // Sound Ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const prevAlertCount = useRef(0);
-
-  // Modal States
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isMapOpen, setIsMapOpen] = useState(false); 
 
   // --- 0. INITIALIZE SOUND ---
   useEffect(() => {
     audioRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
   }, []);
 
-  // --- 1. GLOBAL MONITOR: DETECT CRITICAL SYMPTOMS (Bleeding/Fever) ---
+  // --- 1. GLOBAL MONITOR: DETECT CRITICAL SYMPTOMS ---
   useEffect(() => {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -129,7 +134,6 @@ export default function DoctorDashboard() {
             const patientData = await Promise.all(snapshot.docs.map(async (doc) => {
                 const data = doc.data();
                 
-                // --- EXCLUSION LOGIC START ---
                 if (data.role === 'doctor') {
                     if (data.isOnline === true) onlineDocs++;
                     return null;
@@ -137,7 +141,6 @@ export default function DoctorDashboard() {
                 if (data.role === 'driver') {
                     return null;
                 }
-                // --- EXCLUSION LOGIC END ---
 
                 if (data.lastActive?.toDate() > oneDayAgo) {
                     activeMoms++;
@@ -227,6 +230,58 @@ export default function DoctorDashboard() {
     }
   };
 
+  // --- CUSTOM PROMPT HANDLERS ---
+  const promptResolveSOS = () => {
+    setConfirmModal({
+        isOpen: true,
+        type: 'sos',
+        title: "Resolve All SOS Alerts?",
+        message: "This will reset the emergency status for all currently active patients. Ensure all emergencies have been attended to."
+    });
+  };
+
+  const promptClearNotifications = () => {
+    setConfirmModal({
+        isOpen: true,
+        type: 'clear_notifs',
+        title: "Clear All Notifications?",
+        message: "This action cannot be undone. All current alerts and messages will be permanently removed from your list."
+    });
+  };
+
+  // --- EXECUTE ACTIONS ---
+  const handleConfirmAction = async () => {
+    if (!confirmModal.type) return;
+    
+    setClearing(true);
+    try {
+        const batch = writeBatch(db);
+
+        if (confirmModal.type === 'sos') {
+            const sosPatients = patients.filter(p => p.sosTriggered);
+            sosPatients.forEach(p => {
+                const userRef = doc(db, "users", p.id);
+                batch.update(userRef, { sosTriggered: false });
+            });
+        } 
+        else if (confirmModal.type === 'clear_notifs') {
+            notifications.forEach(notif => {
+                const notifRef = doc(db, "notifications", notif.id);
+                batch.delete(notifRef);
+            });
+        }
+
+        await batch.commit();
+        setConfirmModal({ isOpen: false, type: null, title: "", message: "" });
+        setShowNotifDropdown(false); // Close dropdown after action
+
+    } catch (error) {
+        console.error("Error executing batch action:", error);
+    } finally {
+        setClearing(false);
+    }
+  };
+
   const sosCount = patients.filter(p => p.status === 'SOS ALERT').length;
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const totalAlerts = sosCount + unreadCount;
@@ -277,6 +332,29 @@ export default function DoctorDashboard() {
                                         <h3 className="font-bold text-sm">Notifications</h3>
                                         <button onClick={() => setShowNotifDropdown(false)}><X className="w-4 h-4 opacity-50"/></button>
                                     </div>
+                                    
+                                    {/* --- ACTIONS BAR (TRIGGERS CUSTOM MODAL) --- */}
+                                    {(sosCount > 0 || notifications.length > 0) && (
+                                        <div className={`px-4 py-2 flex gap-2 border-b ${darkMode ? "bg-slate-800/50 border-slate-800" : "bg-slate-50 border-slate-100"}`}>
+                                            {sosCount > 0 && (
+                                                <button 
+                                                    onClick={promptResolveSOS}
+                                                    className="flex-1 text-[10px] font-bold uppercase bg-red-500 hover:bg-red-600 text-white py-1.5 px-2 rounded flex items-center justify-center gap-1 transition-colors"
+                                                >
+                                                    <CheckCircle className="w-3 h-3" /> Resolve SOS
+                                                </button>
+                                            )}
+                                            {notifications.length > 0 && (
+                                                <button 
+                                                    onClick={promptClearNotifications}
+                                                    className={`flex-1 text-[10px] font-bold uppercase py-1.5 px-2 rounded flex items-center justify-center gap-1 transition-colors ${darkMode ? "bg-slate-700 hover:bg-slate-600 text-slate-200" : "bg-white border hover:bg-slate-50 text-slate-600"}`}
+                                                >
+                                                    <Trash2 className="w-3 h-3" /> Clear All
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="max-h-[400px] overflow-y-auto">
                                         
                                         {/* SOS ALERTS */}
@@ -346,7 +424,58 @@ export default function DoctorDashboard() {
         </div>
       )}
 
-      {/* MODALS */}
+      {/* --- CUSTOM CONFIRMATION MODAL --- */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+            <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+            >
+                <motion.div 
+                    initial={{ scale: 0.95, y: 10 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.95, y: 10 }}
+                    className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden ${darkMode ? "bg-slate-900 border border-slate-700" : "bg-white"}`}
+                >
+                    <div className="p-6">
+                        <div className="flex items-start gap-4">
+                            <div className="p-3 bg-red-100 text-red-600 rounded-full">
+                                <AlertOctagon className="w-6 h-6" />
+                            </div>
+                            <div className="flex-1">
+                                <h3 className={`text-lg font-bold mb-2 ${darkMode ? "text-white" : "text-slate-900"}`}>{confirmModal.title}</h3>
+                                <p className={`text-sm leading-relaxed ${darkMode ? "text-slate-400" : "text-slate-500"}`}>{confirmModal.message}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div className={`px-6 py-4 flex gap-3 justify-end ${darkMode ? "bg-slate-800" : "bg-slate-50"}`}>
+                        <button 
+                            disabled={clearing}
+                            onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${darkMode ? "text-slate-300 hover:bg-slate-700" : "text-slate-600 hover:bg-slate-200"}`}
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            disabled={clearing}
+                            onClick={handleConfirmAction}
+                            className="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                            {clearing ? (
+                                <span className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span>
+                            ) : (
+                                "Confirm Action"
+                            )}
+                        </button>
+                    </div>
+                </motion.div>
+            </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* OTHER MODALS */}
       {isAddModalOpen && <AddPatientModal onClose={() => setIsAddModalOpen(false)} />}
       
       {isMapOpen && (
