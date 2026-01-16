@@ -2,23 +2,23 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
-  ArrowLeft, ShieldAlert, Phone, Ambulance, Loader2, 
+  ArrowLeft, Ambulance, Phone, Loader2, 
   Volume2, VolumeX, MapPin, Share2, Sun, Moon, Globe 
 } from "lucide-react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, getDoc, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import SOSButton from "@/features/patient/components/sos/SOSButton";
 import ContactManager from "@/features/patient/components/sos/ContactManager";
 import { useTheme } from "@/context/ThemeContext";
 
 export default function SOSPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<any>(null); // Auth User
+  const [dbUser, setDbUser] = useState<any>({}); // Firestore User Profile Data
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Set default to Dark Mode with a Pinkish tint for the "Emergency" feel
   const { darkMode, toggleDarkMode } = useTheme();
   const [lang, setLang] = useState<'en'|'bn'>('en');
   
@@ -30,32 +30,21 @@ export default function SOSPage() {
       if (currentUser) {
         setUser(currentUser);
         const userRef = doc(db, "users", currentUser.uid);
-        const snapshot = await getDoc(userRef);
-        
-        if (snapshot.exists()) {
-            const data = snapshot.data();
-            // Load language preference but keep theme as requested
-            if (data.settings?.language) setLang(data.settings.language);
 
-            let contactList = data.emergencyContacts || [];
-            const onboardingPhone = data.basicInfo?.emergencyContact || data.emergencyContact;
-
-            if (onboardingPhone && !contactList.some((c: any) => c.phone === onboardingPhone)) {
-                contactList = [
-                    { id: "primary_auto", name: "Family (Primary)", phone: onboardingPhone, isPrimary: true }, 
-                    ...contactList
-                ];
-            }
-            setContacts(contactList);
-        }
-
+        // Real-time listener for User Profile & Contacts
         const unsubDoc = onSnapshot(userRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
+                setDbUser(data); // <--- STORE FIRESTORE DATA HERE
+
+                // Handle Settings
                 if (data.settings?.language) setLang(data.settings.language);
                 
+                // Handle Contacts
                 let contactList = data.emergencyContacts || [];
                 const onboardingPhone = data.basicInfo?.emergencyContact || data.emergencyContact;
+                
+                // Ensure Primary Contact exists
                 if (onboardingPhone && !contactList.some((c: any) => c.phone === onboardingPhone)) {
                     contactList = [{ id: "primary_auto", name: "Family (Primary)", phone: onboardingPhone, isPrimary: true }, ...contactList];
                 }
@@ -141,7 +130,8 @@ export default function SOSPage() {
                 </div>
             </div>
 
-            <SOSButton user={user} contacts={contacts} darkMode={darkMode} />
+            {/* PASSING MERGED USER DATA (Auth + Firestore) */}
+            <SOSButton user={{ ...user, ...dbUser }} contacts={contacts} darkMode={darkMode} />
 
             {/* QUICK ACTIONS TOOLKIT */}
             <div className="grid grid-cols-3 gap-3">
@@ -157,7 +147,7 @@ export default function SOSPage() {
                     <Phone className="w-6 h-6 fill-white" /> CALL 16263
                 </a>
                 <p className={`mt-4 text-[10px] font-bold uppercase tracking-widest opacity-40 ${darkMode ? "text-white" : "text-slate-900"}`}>
-                    National Health Batayon [cite: 30]
+                    National Health Batayon
                 </p>
             </div>
         </main>

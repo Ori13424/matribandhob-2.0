@@ -1,21 +1,71 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, MapPin } from "lucide-react";
 import { addDoc, collection, serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { sendSOSNotification } from "@/app/sos";
 
 export default function SOSButton({ user, contacts, onTrigger }: any) {
   const [status, setStatus] = useState<'idle' | 'counting' | 'sending' | 'sent'>('idle');
   const [count, setCount] = useState(5);
+  
+  // Store the live location locally
+  const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [activeAlertId, setActiveAlertId] = useState<string | null>(null);
+
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const sirenRef = useRef<HTMLAudioElement | null>(null);
+  const watchIdRef = useRef<number | null>(null);
 
-  // --- SOUND EFFECT SETUP ---
+  // --- 1. INITIALIZE AUDIO & START GPS TRACKING IMMEDIATELY ---
   useEffect(() => {
+    // Setup Siren
     sirenRef.current = new Audio("https://cdn.pixabay.com/download/audio/2022/03/15/audio_731818292c.mp3?filename=police-siren-one-loop-23263.mp3");
     sirenRef.current.loop = true;
-  }, []);
+
+    // Start Watching Location Immediately (Warms up GPS)
+    if (navigator.geolocation) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          // Update local state
+          setCurrentLocation({ lat: latitude, lng: longitude });
+
+          // If an alert is ALREADY active, update the DB in real-time (Live Tracking)
+          if (activeAlertId) {
+            updateLiveLocation(activeAlertId, latitude, longitude);
+          }
+        },
+        (error) => console.error("GPS Watch Error:", error),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    };
+  }, [activeAlertId]); // Re-run if activeAlertId changes so the closure captures it
+
+  // Helper to push live updates to Firestore
+  const updateLiveLocation = async (alertId: string, lat: number, lng: number) => {
+    try {
+      const alertRef = doc(db, "alerts", alertId);
+      await updateDoc(alertRef, {
+        location: { lat, lng },
+        googleMapsLink: `http://maps.google.com/?q=${lat},${lng}`,
+        lastUpdate: serverTimestamp()
+      });
+      // Also update user profile for redundancy
+      if (user?.uid) {
+         await updateDoc(doc(db, "users", user.uid), {
+            lastKnownLocation: { lat, lng }
+         });
+      }
+    } catch (e) {
+      console.error("Live update failed", e);
+    }
+  };
 
   const playSiren = () => {
     if (sirenRef.current) {
@@ -31,7 +81,7 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
     }
   };
 
-  // --- START HOLD TIMER ---
+  // --- 2. SOS INTERACTION LOGIC ---
   const startSOS = () => {
     if (status !== 'idle') return;
     setStatus('counting');
@@ -56,73 +106,86 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
     }
   };
 
-  // --- SEND ALERT ---
+  // --- 3. TRIGGER ALERT WITH BEST AVAILABLE LOCATION ---
   const triggerAlert = async () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     setStatus('sending');
 
     try {
-      // 1. Play Sound
       playSiren();
 
-      // 2. Get Location (Safe Fallback)
-      const position = await new Promise<GeolocationPosition>((resolve) => {
-        if (!navigator.geolocation) {
-            resolve({ coords: { latitude: 0, longitude: 0 } } as any);
-            return;
-        }
-        navigator.geolocation.getCurrentPosition(
-            (pos) => resolve(pos), 
-            () => resolve({ coords: { latitude: 0, longitude: 0 } } as any),
-            { enableHighAccuracy: true, timeout: 5000 }
-        );
-      });
+      // Use the location we have been watching. 
+      // If still null (rare, unless GPS is broken), try one last force fetch.
+      let finalLat = currentLocation?.lat || 0;
+      let finalLng = currentLocation?.lng || 0;
 
-      const loc = { lat: position.coords.latitude, lng: position.coords.longitude };
+      if (finalLat === 0) {
+         // Fallback: One desperate attempt to get location if watch failed
+         try {
+             const pos: any = await new Promise((resolve, reject) => {
+                 navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy: true, timeout: 3000});
+             });
+             finalLat = pos.coords.latitude;
+             finalLng = pos.coords.longitude;
+             setCurrentLocation({ lat: finalLat, lng: finalLng });
+         } catch (e) {
+             console.warn("Could not fetch fallback location");
+         }
+      }
 
-      // 3. Create Alert Record
-      await addDoc(collection(db, "alerts"), {
+      const mapsLink = `http://maps.google.com/?q=${finalLat},${finalLng}`;
+      const patientName = user?.name || user?.displayName || "Unknown Patient";
+      const patientPhone = user?.phone || user?.phoneNumber || user?.basicInfo?.phone || user?.contact || "N/A";
+
+      // Create Alert Record in Firestore
+      const docRef = await addDoc(collection(db, "alerts"), {
         patientId: user?.uid || "guest",
-        patientName: user?.displayName || "Mother",
+        patientName: patientName,
+        phone: patientPhone,
         type: "EMERGENCY_SOS",
-        status: "active",
+        priority: "CRITICAL",
+        status: "OPEN",
         timestamp: serverTimestamp(),
-        location: loc,
-        notifiedContacts: contacts || []
+        location: { lat: finalLat, lng: finalLng }, // Initial Location
+        googleMapsLink: mapsLink,
+        notifiedContacts: contacts || [],
+        deviceInfo: navigator.userAgent || "Unknown Device"
       });
 
-      // 4. Update User Profile
+      // Save the ID so the `watchPosition` effect can start updating it live
+      setActiveAlertId(docRef.id);
+
       if (user?.uid) {
         await updateDoc(doc(db, "users", user.uid), {
             sosTriggered: true, 
-            location: loc,
-            lastActive: serverTimestamp()
+            lastKnownLocation: { lat: finalLat, lng: finalLng },
+            lastEmergencyTime: serverTimestamp()
         });
       }
       
-      // 5. Open SMS (Fallback)
+      // Send Twilio SMS (Server Action)
       if (contacts && contacts.length > 0) {
-        const numbers = contacts.map((c: any) => c.phone).join(',');
-        const mapLink = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
-        setTimeout(() => {
-            window.location.href = `sms:${numbers}?body=${encodeURIComponent(`EMERGENCY! I need help. My location: ${mapLink}`)}`;
-        }, 500);
+         sendSOSNotification(
+            contacts, 
+            { name: patientName, phone: patientPhone }, 
+            mapsLink
+         );
       }
 
       setStatus('sent');
       if (onTrigger) onTrigger();
 
     } catch (error) {
-      console.error("SOS Error:", error);
-      stopSiren();
-      alert("Connection Failed. Call 999 immediately.");
-      setStatus('idle');
+      console.error("SOS Failure:", error);
+      alert("Network Warning: Check internet. Siren is active.");
+      setStatus('sent'); 
     }
   };
 
-  // --- RESET FUNCTION ---
   const resetSOS = async () => {
     stopSiren();
+    setActiveAlertId(null); // Stop live DB updates
+    
     if (user?.uid) {
         try {
             await updateDoc(doc(db, "users", user.uid), { sosTriggered: false });
@@ -134,6 +197,12 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
 
   return (
     <div className="flex flex-col items-center justify-center py-6">
+      {/* GPS STATUS INDICATOR (Optional visual to see if GPS is locked) */}
+      <div className={`absolute top-0 right-0 m-4 flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full ${currentLocation ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
+        <MapPin className="w-3 h-3" />
+        {currentLocation ? "GPS LOCKED" : "SEARCHING GPS..."}
+      </div>
+
       {status === 'idle' && (
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -173,7 +242,7 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
                 <CheckCircle2 className="w-24 h-24 text-white mb-3" />
                 <span className="text-white font-black text-2xl tracking-widest">SENT!</span>
             </div>
-            <p className="mt-6 text-center text-slate-500 font-bold animate-pulse">Siren Active • Doctor Notified</p>
+            <p className="mt-6 text-center text-slate-500 font-bold animate-pulse">Siren Active • Live Tracking On</p>
             <button onClick={resetSOS} className="mt-6 px-8 py-3 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold flex items-center gap-2 transition-colors">
                 <RefreshCw className="w-4 h-4" /> Stop Siren & Reset
             </button>
