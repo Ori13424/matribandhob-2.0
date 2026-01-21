@@ -1,497 +1,347 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion"; 
-import { 
-  collection, query, orderBy, limit, onSnapshot, getDocs, where, updateDoc, doc, 
-  collectionGroup, getDoc, addDoc, deleteDoc, serverTimestamp, writeBatch 
+import { AnimatePresence, motion } from "framer-motion";
+import {
+    collection, doc, writeBatch, serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { useTheme } from "@/context/ThemeContext";
-import dynamic from "next/dynamic"; 
-import { Users, Truck, Map, X, Bell, AlertTriangle, CheckCircle, Trash2, AlertOctagon } from "lucide-react"; 
+import dynamic from "next/dynamic";
+import { Users, Truck, Map, X, Bell, AlertTriangle, CheckCircle, Trash2, AlertOctagon, Send } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 
 // Components
-import DoctorDashboardLoader from "@/features/doctor/components/DoctorDashboardLoader";
-import DoctorStatsWidget, { LiveStatsData } from "@/features/doctor/DoctorStatsWidget"; 
+import DoctorStatsWidget from "@/features/doctor/DoctorStatsWidget";
 import PatientWaitingRoom from "@/features/doctor/components/PatientWaitingRoom";
 import AddPatientModal from "@/features/doctor/components/patients/AddPatientModal";
+import PatientAnalyticsWidget from "@/features/doctor/components/dashboard/PatientAnalyticsWidget";
+import { PatientService, Patient, DashboardStats } from "@/services/patient.service";
 
 const PatientMap = dynamic(
-  () => import("@/features/doctor/components/patients/PatientMap"), 
-  { ssr: false, loading: () => <div className="h-full w-full bg-slate-100 animate-pulse flex items-center justify-center">Loading...</div> }
+    () => import("@/features/doctor/components/patients/PatientMap"),
+    { ssr: false, loading: () => <div className="h-full w-full bg-slate-100 animate-pulse flex items-center justify-center rounded-3xl">Loading Map...</div> }
 );
 
-// Helper to normalize array
-const normalizeList = (input: any) => {
-    if (!input) return [];
-    if (Array.isArray(input)) return input;
-    if (typeof input === 'string') return input.split(',');
-    return [String(input)];
-};
-
 export default function DoctorDashboard() {
-  const router = useRouter();
-  const { darkMode } = useTheme();
-  
-  // Data States
-  const [loading, setLoading] = useState(true); 
-  const [patients, setPatients] = useState<any[]>([]);
-  const [liveStats, setLiveStats] = useState<LiveStatsData>({ activeMothers: 0, onlineDoctors: 0 }); 
-  
-  // Notification States
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
-  const [clearing, setClearing] = useState(false); 
+    const router = useRouter();
+    const { darkMode } = useTheme();
+    const t = useTranslation();
 
-  // Modal & Confirmation States
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isMapOpen, setIsMapOpen] = useState(false); 
-  const [confirmModal, setConfirmModal] = useState<{
-    isOpen: boolean;
-    type: 'sos' | 'clear_notifs' | null;
-    title: string;
-    message: string;
-  }>({ isOpen: false, type: null, title: "", message: "" });
+    // State
+    const [loading, setLoading] = useState(true);
+    const [patients, setPatients] = useState<Patient[]>([]);
+    const [liveStats, setLiveStats] = useState<DashboardStats>({ activeMothers: 0, onlineDoctors: 0 });
+    const [notifications, setNotifications] = useState<any[]>([]);
+    const [showNotifDropdown, setShowNotifDropdown] = useState(false);
 
-  // Sound Ref
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const prevAlertCount = useRef(0);
+    // Modals
+    const [isMapOpen, setIsMapOpen] = useState(false);
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [isAdvisoryOpen, setIsAdvisoryOpen] = useState(false);
+    const [advisoryText, setAdvisoryText] = useState("");
+    const [sendingAdvisory, setSendingAdvisory] = useState(false);
 
-  // --- 0. INITIALIZE SOUND ---
-  useEffect(() => {
-    audioRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
-  }, []);
+    const [confirmModal, setConfirmModal] = useState({ isOpen: false, type: '', title: '', message: '' });
+    const [clearing, setClearing] = useState(false);
 
-  // --- 1. GLOBAL MONITOR: DETECT CRITICAL SYMPTOMS ---
-  useEffect(() => {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    // Auth Check
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            if (!user) router.push('/login');
+        });
+        return () => unsubscribe();
+    }, [router]);
 
-    const qGlobalLogs = query(
-        collectionGroup(db, 'dailyLogs'),
-        where('lastUpdated', '>=', oneDayAgo)
-    );
+    // Data Subscription
+    useEffect(() => {
+        const unsubscribe = PatientService.subscribeToPatients(
+            (updatedPatients, updatedStats) => {
+                setPatients(updatedPatients);
+                setLiveStats(updatedStats);
+                setLoading(false);
+                generateNotifications(updatedPatients);
+            },
+            (err) => {
+                console.error("Error fetching patients:", err);
+                setLoading(false);
+            }
+        );
+        return () => unsubscribe();
+    }, []);
 
-    const unsubGlobal = onSnapshot(qGlobalLogs, async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
-            if (change.type === 'added' || change.type === 'modified') {
-                const logData = change.doc.data();
-                const logId = change.doc.id;
-                const patientId = change.doc.ref.parent.parent?.id;
+    // Generate Notifications from Patient Data
+    const generateNotifications = (patientList: Patient[]) => {
+        const newNotifs: any[] = [];
+        patientList.forEach(p => {
+            if (p.status === 'SOS ALERT') {
+                newNotifs.push({
+                    id: `sos-${p.id}`,
+                    type: 'critical',
+                    title: `SOS: ${p.name}`,
+                    message: `${p.name} has triggered an SOS alert.`,
+                    timestamp: new Date(),
+                    isRead: false
+                });
+            } else if (p.status === 'High Risk' || p.isHighRisk) {
+                newNotifs.push({
+                    id: `bp-${p.id}`,
+                    type: 'warning',
+                    title: `High Risk: ${p.name}`,
+                    message: `Patient flagged as High Risk. Check vitals.`,
+                    timestamp: new Date(),
+                    isRead: false
+                });
+            }
+        });
+        setNotifications(newNotifs);
+    };
 
-                if (!patientId || !auth.currentUser) continue;
+    // --- SEND ADVISORY LOGIC ---
+    const sendAdvisory = async () => {
+        if (!auth.currentUser || !advisoryText.trim()) return;
+        setSendingAdvisory(true);
+        try {
+            const batch = writeBatch(db);
+            const newDoc = doc(collection(db, "announcements"));
+            batch.set(newDoc, {
+                title: "Doctor's Advisory",
+                message: advisoryText,
+                authorId: auth.currentUser.uid,
+                authorName: auth.currentUser.displayName || "Dr. Matribandhob",
+                audience: 'all',
+                timestamp: serverTimestamp(),
+                type: 'medical'
+            });
+            await batch.commit();
+            setAdvisoryText("");
+            setIsAdvisoryOpen(false);
+            alert("Medical Advisory Broadcasted Successfully.");
+        } catch (e) {
+            console.error("Advisory Error", e);
+            alert("Failed to send advisory.");
+        }
+        setSendingAdvisory(false);
+    };
 
-                const symptoms = normalizeList(logData.symptoms).map(s => String(s).toLowerCase());
-                const criticalSymptoms = symptoms.filter(s => s.includes('bleeding') || s.includes('fever'));
-                const hasCriticalCondition = criticalSymptoms.length > 0;
+    // Handlers
+    const promptResolveSOS = () => {
+        setConfirmModal({
+            isOpen: true,
+            type: 'sos',
+            title: "Resolve All SOS Alerts?",
+            message: "This will mark all current SOS alerts as resolved and return patients to normal monitoring status. Ensure all emergencies are handled first."
+        });
+    };
 
-                const notifQuery = query(collection(db, "notifications"), where("relatedLogId", "==", logId));
-                const notifSnap = await getDocs(notifQuery);
+    const promptClearNotifications = () => {
+        setNotifications([]); // Client side clear for now
+    };
 
-                if (hasCriticalCondition) {
-                    if (notifSnap.empty) {
-                        const pDoc = await getDoc(doc(db, "users", patientId));
-                        const pData = pDoc.exists() ? pDoc.data() : {};
-                        const pName = pData.basicInfo?.fullName || pData.fullName || "Patient";
+    const handleConfirmAction = async () => {
+        setClearing(true);
+        try {
+            if (confirmModal.type === 'sos') {
+                // Implement Real Resolution
+                const batch = writeBatch(db);
+                let count = 0;
+                patients.filter(p => p.status === 'SOS ALERT' || p.sosTriggered).forEach(p => {
+                    const ref = doc(db, 'users', p.id);
+                    batch.update(ref, { sosTriggered: false, status: 'Active' });
+                    count++;
+                });
 
-                        await addDoc(collection(db, "notifications"), {
-                            recipientId: auth.currentUser.uid,
-                            patientId: patientId,
-                            patientName: pName,
-                            title: "Critical Symptom Alert",
-                            message: `Patient reported critical symptoms: ${criticalSymptoms.join(", ")}`,
-                            type: "critical",
-                            isRead: false,
-                            timestamp: serverTimestamp(),
-                            relatedLogId: logId,
-                            link: `/doctor/patients/${patientId}`
-                        });
-                    }
-                } else {
-                    if (!notifSnap.empty) {
-                        notifSnap.forEach(async (d) => await deleteDoc(d.ref));
-                    }
+                if (count > 0) {
+                    await batch.commit();
+                    // Refetch handled by subscription
                 }
             }
+        } catch (error) {
+            console.error("Action failed", error);
+        } finally {
+            setClearing(false);
+            setConfirmModal({ ...confirmModal, isOpen: false });
         }
-    });
+    };
 
-    return () => unsubGlobal();
-  }, []);
+    const sosCount = patients.filter(p => p.status === 'SOS ALERT' || p.sosTriggered).length;
 
-  // --- 2. FETCH PATIENTS & LIVE STATS ---
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const q = query(collection(db, "users"));
-        
-        const unsubSnapshot = onSnapshot(q, async (snapshot) => {
-            let onlineDocs = 0;
-            let activeMoms = 0;
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if (loading) return (
+        <div className="h-[80vh] flex flex-col items-center justify-center space-y-4">
+            <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin" />
+            <p className={`font-bold ${darkMode ? "text-slate-500" : "text-slate-400"}`}>Syncing Patient Data...</p>
+        </div>
+    );
 
-            const patientData = await Promise.all(snapshot.docs.map(async (doc) => {
-                const data = doc.data();
-                
-                if (data.role === 'doctor') {
-                    if (data.isOnline === true) onlineDocs++;
-                    return null;
-                }
-                if (data.role === 'driver') {
-                    return null;
-                }
+    return (
+        <div className="space-y-8 animate-in fade-in duration-500">
 
-                if (data.lastActive?.toDate() > oneDayAgo) {
-                    activeMoms++;
-                }
+            {/* DASHBOARD ACTIONS HEADER */}
+            <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-6">
+                <div>
+                    <h2 className={`text-2xl font-bold ${darkMode ? "text-white" : "text-slate-800"}`}>Overview</h2>
+                    <p className={`text-sm ${darkMode ? "text-slate-400" : "text-slate-500"}`}>Welcome back, here is today's summary.</p>
+                </div>
 
-                const healthQ = query(collection(db, "users", doc.id, "health_logs"), orderBy("timestamp", "desc"), limit(1));
-                const healthSnap = await getDocs(healthQ);
-                const lastVital = healthSnap.empty ? null : healthSnap.docs[0].data();
-
-                let status = "Normal";
-                let statusColor = "green";
-                let sosTriggered = data.sosTriggered === true; 
-                
-                if (lastVital?.bp) {
-                    const [sys, dia] = lastVital.bp.split('/').map(Number);
-                    if (sys >= 140 || dia >= 90) { status = "High BP"; statusColor = "red"; }
-                }
-                if (sosTriggered) { status = "SOS ALERT"; statusColor = "red"; }
-
-                return {
-                    id: doc.id,
-                    name: data.basicInfo?.fullName || data.fullName || "Unknown",
-                    week: data.pregnancyDetails?.currentWeek || 0,
-                    edd: data.pregnancyDetails?.edd || "N/A",
-                    bloodGroup: data.basicInfo?.bloodGroup || "--",
-                    location: data.location || null, 
-                    sosTriggered: sosTriggered,      
-                    lastVital, status, statusColor,
-                    phone: data.basicInfo?.phone || "N/A"
-                };
-            }));
-            
-            setPatients(patientData.filter(p => p !== null));
-            setLiveStats({ activeMothers: activeMoms, onlineDoctors: onlineDocs });
-
-            setTimeout(() => { setLoading(false); }, 2500);
-        });
-        return () => unsubSnapshot();
-      } else { router.push("/login"); }
-    });
-    return () => unsubAuth();
-  }, [router]);
-
-  // --- 3. FETCH NOTIFICATIONS ---
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (!user) return;
-      
-      const q = query(
-        collection(db, "notifications"),
-        where("recipientId", "==", user.uid),
-        orderBy("timestamp", "desc"),
-        limit(20)
-      );
-
-      const unsub = onSnapshot(q, (snapshot) => {
-        setNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-
-      return () => unsub();
-    });
-    return () => unsubAuth();
-  }, []);
-
-  // --- 4. SOUND EFFECT LOGIC ---
-  useEffect(() => {
-    const sosCount = patients.filter(p => p.status === 'SOS ALERT').length;
-    const unreadCount = notifications.filter(n => !n.isRead).length;
-    const currentTotal = sosCount + unreadCount;
-
-    if (currentTotal > prevAlertCount.current) {
-        audioRef.current?.play().catch(e => console.log("Audio interaction needed:", e));
-    }
-    prevAlertCount.current = currentTotal;
-  }, [patients, notifications]);
-
-  // --- HANDLERS ---
-  const handleNotificationClick = async (notif: any) => {
-    try {
-      if (!notif.isRead) {
-        await updateDoc(doc(db, "notifications", notif.id), { isRead: true });
-      }
-      setShowNotifDropdown(false);
-      if (notif.link) router.push(notif.link);
-    } catch (e) {
-      console.error("Error updating notification", e);
-    }
-  };
-
-  // --- CUSTOM PROMPT HANDLERS ---
-  const promptResolveSOS = () => {
-    setConfirmModal({
-        isOpen: true,
-        type: 'sos',
-        title: "Resolve All SOS Alerts?",
-        message: "This will reset the emergency status for all currently active patients. Ensure all emergencies have been attended to."
-    });
-  };
-
-  const promptClearNotifications = () => {
-    setConfirmModal({
-        isOpen: true,
-        type: 'clear_notifs',
-        title: "Clear All Notifications?",
-        message: "This action cannot be undone. All current alerts and messages will be permanently removed from your list."
-    });
-  };
-
-  // --- EXECUTE ACTIONS ---
-  const handleConfirmAction = async () => {
-    if (!confirmModal.type) return;
-    
-    setClearing(true);
-    try {
-        const batch = writeBatch(db);
-
-        if (confirmModal.type === 'sos') {
-            const sosPatients = patients.filter(p => p.sosTriggered);
-            sosPatients.forEach(p => {
-                const userRef = doc(db, "users", p.id);
-                batch.update(userRef, { sosTriggered: false });
-            });
-        } 
-        else if (confirmModal.type === 'clear_notifs') {
-            notifications.forEach(notif => {
-                const notifRef = doc(db, "notifications", notif.id);
-                batch.delete(notifRef);
-            });
-        }
-
-        await batch.commit();
-        setConfirmModal({ isOpen: false, type: null, title: "", message: "" });
-        setShowNotifDropdown(false); // Close dropdown after action
-
-    } catch (error) {
-        console.error("Error executing batch action:", error);
-    } finally {
-        setClearing(false);
-    }
-  };
-
-  const sosCount = patients.filter(p => p.status === 'SOS ALERT').length;
-  const unreadCount = notifications.filter(n => !n.isRead).length;
-  const totalAlerts = sosCount + unreadCount;
-
-  return (
-    <>
-      <AnimatePresence>
-        {loading && (
-            <motion.div exit={{ opacity: 0 }} transition={{ duration: 0.5 }} className="fixed inset-0 z-[200] bg-white">
-                <DoctorDashboardLoader />
-            </motion.div>
-        )}
-      </AnimatePresence>
-
-      {!loading && (
-        <div className="space-y-8 animate-in fade-in duration-700 pb-10">
-          
-          {/* HEADER */}
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 pt-2">
-            <div className="flex-1">
-                <div className="flex items-center gap-3 mb-1">
-                    <h1 className={`text-3xl font-bold ${darkMode ? "text-white" : "text-slate-800"}`}>Dashboard</h1>
-                    
+                <div className="flex flex-wrap gap-3">
                     {/* NOTIFICATION BELL */}
-                    <div className="relative z-50">
-                        <div 
-                           onClick={() => setShowNotifDropdown(!showNotifDropdown)}
-                           className={`relative p-2 rounded-full cursor-pointer transition-colors ${totalAlerts > 0 ? "bg-red-100 text-red-600 animate-pulse" : (darkMode ? "bg-white/10 text-white" : "bg-slate-100 text-slate-500")}`}
+                    <div className="relative z-20">
+                        <button
+                            onClick={() => setShowNotifDropdown(!showNotifDropdown)}
+                            className={`p-3 rounded-2xl transition-all relative border ${darkMode ? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
                         >
-                            <Bell className="w-5 h-5" />
-                            {totalAlerts > 0 && (
-                                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white animate-bounce">
-                                    {totalAlerts}
-                                </span>
+                            <Bell className={`w-5 h-5 ${notifications.some(n => !n.isRead) ? "animate-swing origin-top" : ""}`} />
+                            {notifications.length > 0 && (
+                                <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-800"></span>
                             )}
-                        </div>
-
-                        {/* Dropdown */}
+                        </button>
                         <AnimatePresence>
                             {showNotifDropdown && (
-                                <motion.div 
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: 10 }}
-                                    className={`absolute left-0 mt-3 w-80 md:w-96 rounded-2xl shadow-2xl border overflow-hidden origin-top-left z-[60] ${darkMode ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"}`}
+                                <motion.div
+                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    className={`absolute right-0 mt-3 w-96 rounded-3xl shadow-2xl overflow-hidden border ${darkMode ? "bg-slate-900 border-slate-700" : "bg-white border-slate-100"}`}
                                 >
                                     <div className={`p-4 border-b flex justify-between items-center ${darkMode ? "border-slate-800" : "border-slate-100"}`}>
                                         <h3 className="font-bold text-sm">Notifications</h3>
-                                        <button onClick={() => setShowNotifDropdown(false)}><X className="w-4 h-4 opacity-50"/></button>
-                                    </div>
-                                    
-                                    {/* --- ACTIONS BAR (TRIGGERS CUSTOM MODAL) --- */}
-                                    {(sosCount > 0 || notifications.length > 0) && (
-                                        <div className={`px-4 py-2 flex gap-2 border-b ${darkMode ? "bg-slate-800/50 border-slate-800" : "bg-slate-50 border-slate-100"}`}>
-                                            {sosCount > 0 && (
-                                                <button 
-                                                    onClick={promptResolveSOS}
-                                                    className="flex-1 text-[10px] font-bold uppercase bg-red-500 hover:bg-red-600 text-white py-1.5 px-2 rounded flex items-center justify-center gap-1 transition-colors"
-                                                >
-                                                    <CheckCircle className="w-3 h-3" /> Resolve SOS
-                                                </button>
-                                            )}
-                                            {notifications.length > 0 && (
-                                                <button 
-                                                    onClick={promptClearNotifications}
-                                                    className={`flex-1 text-[10px] font-bold uppercase py-1.5 px-2 rounded flex items-center justify-center gap-1 transition-colors ${darkMode ? "bg-slate-700 hover:bg-slate-600 text-slate-200" : "bg-white border hover:bg-slate-50 text-slate-600"}`}
-                                                >
-                                                    <Trash2 className="w-3 h-3" /> Clear All
-                                                </button>
-                                            )}
+                                        <div className="flex gap-2">
+                                            {sosCount > 0 && <button onClick={promptResolveSOS} className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-1 rounded-full hover:bg-red-200">RESOLVE SOS</button>}
+                                            <button onClick={() => setShowNotifDropdown(false)}><X className="w-4 h-4 opacity-50" /></button>
                                         </div>
-                                    )}
-
-                                    <div className="max-h-[400px] overflow-y-auto">
-                                        
-                                        {/* SOS ALERTS */}
-                                        {patients.filter(p => p.status === 'SOS ALERT').map(p => (
-                                            <div key={p.id} onClick={() => router.push(`/doctor/patients/${p.id}`)} className="p-4 border-b border-red-100 bg-red-50 hover:bg-red-100 cursor-pointer transition-colors group">
-                                                <div className="flex gap-3">
-                                                    <div className="mt-1 p-1.5 bg-red-500 text-white rounded-full h-fit animate-pulse"><Bell className="w-3 h-3" /></div>
-                                                    <div>
-                                                        <p className="text-sm font-bold text-red-700">SOS TRIGGERED</p>
-                                                        <p className="text-xs text-red-600 mb-1">{p.name} has triggered an emergency SOS.</p>
-                                                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-white/50 rounded text-red-800 border border-red-200">Immediate Action Required</span>
-                                                    </div>
+                                    </div>
+                                    <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                                        {notifications.length === 0 ? (
+                                            <div className="p-8 text-center opacity-40 text-sm">No new alerts</div>
+                                        ) : notifications.map(n => (
+                                            <div key={n.id} className={`p-4 border-b flex gap-3 ${darkMode ? "border-slate-800 hover:bg-white/5" : "border-slate-50 hover:bg-slate-50"}`}>
+                                                <div className={`mt-1 p-1.5 rounded-full h-fit ${n.type === 'critical' ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"}`}>
+                                                    {n.type === 'critical' ? <AlertOctagon className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                                                </div>
+                                                <div>
+                                                    <p className={`text-sm font-bold ${darkMode ? "text-slate-200" : "text-slate-800"}`}>{n.title}</p>
+                                                    <p className="text-xs opacity-60">{n.message}</p>
                                                 </div>
                                             </div>
                                         ))}
-
-                                        {/* SYMPTOM ALERTS */}
-                                        {notifications.length > 0 ? (
-                                            notifications.map((notif) => (
-                                                <div 
-                                                    key={notif.id} 
-                                                    onClick={() => handleNotificationClick(notif)}
-                                                    className={`p-4 border-b cursor-pointer transition-colors flex gap-3 ${!notif.isRead ? (darkMode ? "bg-slate-800 border-slate-700" : "bg-blue-50/50 border-slate-100") : (darkMode ? "hover:bg-slate-800 border-slate-800" : "hover:bg-slate-50 border-slate-100")}`}
-                                                >
-                                                    <div className={`mt-1 p-1.5 rounded-full h-fit ${notif.type === 'critical' ? "bg-orange-500/10 text-orange-600" : "bg-blue-500/10 text-blue-600"}`}>
-                                                        {notif.type === 'critical' ? <AlertTriangle className="w-3 h-3" /> : <Users className="w-3 h-3"/>}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <div className="flex justify-between items-start w-full">
-                                                            <p className={`text-sm font-bold ${!notif.isRead ? (darkMode?"text-white":"text-slate-900") : "opacity-70"}`}>{notif.title}</p>
-                                                            {!notif.isRead && <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></span>}
-                                                        </div>
-                                                        <p className="text-xs opacity-70 mb-1 line-clamp-2">{notif.message}</p>
-                                                        <p className="text-[10px] opacity-40">{notif.timestamp?.toDate ? new Date(notif.timestamp.toDate()).toLocaleString() : "Just now"}</p>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        ) : (
-                                            sosCount === 0 && <div className="p-8 text-center opacity-50 text-xs">No new notifications</div>
-                                        )}
                                     </div>
                                 </motion.div>
                             )}
                         </AnimatePresence>
                     </div>
+
+                    <button onClick={() => setIsMapOpen(true)} className="px-5 py-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-2xl text-sm font-bold shadow-sm flex items-center gap-2 transition-all dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700">
+                        <Map className="w-4 h-4 text-teal-500" /> Live Cluster
+                    </button>
+                    <button onClick={() => setIsAdvisoryOpen(true)} className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-sm font-bold shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95">
+                        <Send className="w-4 h-4" /> Broadcast Advisory
+                    </button>
+                    <button onClick={() => setIsAddModalOpen(true)} className="px-5 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-sm font-bold shadow-lg shadow-teal-500/20 flex items-center gap-2 transition-all active:scale-95">
+                        <Users className="w-4 h-4" /> Register Patient
+                    </button>
                 </div>
-                <p className={`text-sm ${darkMode ? "text-slate-400" : "text-slate-500"}`}>Overview of active patients and emergency requests.</p>
             </div>
-            
-            {/* ACTION BUTTONS */}
-            <div className="flex flex-wrap gap-3 w-full lg:w-auto">
-                <button onClick={() => setIsMapOpen(true)} className="flex-1 lg:flex-none px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 transition-transform active:scale-95">
-                    <Map className="w-4 h-4" /> Live Map
-                </button>
-                <button onClick={() => router.push('/doctor/emergency-map')} className="flex-1 lg:flex-none px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 transition-transform active:scale-95">
-                    <Truck className="w-4 h-4" /> Drivers
-                </button>
-                <button onClick={() => setIsAddModalOpen(true)} className="flex-1 lg:flex-none px-5 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-teal-600/20 flex items-center justify-center gap-2 transition-transform active:scale-95">
-                    <Users className="w-4 h-4" /> Add Patient
-                </button>
-            </div>
-          </div>
 
-          <DoctorStatsWidget patients={patients} liveStats={liveStats} />
-          <PatientWaitingRoom patients={patients} />
+            {/* STATS WIDGET */}
+            <DoctorStatsWidget patients={patients} liveStats={liveStats} />
 
-        </div>
-      )}
-
-      {/* --- CUSTOM CONFIRMATION MODAL --- */}
-      <AnimatePresence>
-        {confirmModal.isOpen && (
-            <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
-            >
-                <motion.div 
-                    initial={{ scale: 0.95, y: 10 }}
-                    animate={{ scale: 1, y: 0 }}
-                    exit={{ scale: 0.95, y: 10 }}
-                    className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden ${darkMode ? "bg-slate-900 border border-slate-700" : "bg-white"}`}
-                >
-                    <div className="p-6">
-                        <div className="flex items-start gap-4">
-                            <div className="p-3 bg-red-100 text-red-600 rounded-full">
-                                <AlertOctagon className="w-6 h-6" />
-                            </div>
-                            <div className="flex-1">
-                                <h3 className={`text-lg font-bold mb-2 ${darkMode ? "text-white" : "text-slate-900"}`}>{confirmModal.title}</h3>
-                                <p className={`text-sm leading-relaxed ${darkMode ? "text-slate-400" : "text-slate-500"}`}>{confirmModal.message}</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div className={`px-6 py-4 flex gap-3 justify-end ${darkMode ? "bg-slate-800" : "bg-slate-50"}`}>
-                        <button 
-                            disabled={clearing}
-                            onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${darkMode ? "text-slate-300 hover:bg-slate-700" : "text-slate-600 hover:bg-slate-200"}`}
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            disabled={clearing}
-                            onClick={handleConfirmAction}
-                            className="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                            {clearing ? (
-                                <span className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span>
-                            ) : (
-                                "Confirm Action"
-                            )}
-                        </button>
-                    </div>
-                </motion.div>
-            </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* OTHER MODALS */}
-      {isAddModalOpen && <AddPatientModal onClose={() => setIsAddModalOpen(false)} />}
-      
-      {isMapOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in zoom-in-95 duration-200">
-          <div className="bg-white w-full max-w-6xl h-[85vh] rounded-3xl overflow-hidden shadow-2xl relative flex flex-col">
-             <div className="flex justify-between items-center px-6 py-4 border-b bg-white z-10">
-                <div className="flex items-center gap-3">
-                   <div className="p-2.5 bg-blue-50 text-blue-600 rounded-full"><Map className="w-5 h-5" /></div>
-                   <div><h3 className="font-bold text-lg text-slate-800">Live Patient Cluster</h3><p className="text-xs text-slate-500">Real-time GPS tracking network</p></div>
+            {/* ANALYTICS & WAITING ROOM */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 h-[450px]">
+                    <PatientAnalyticsWidget patients={patients} />
                 </div>
-                <button onClick={() => setIsMapOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"><X className="w-6 h-6" /></button>
-             </div>
-             <div className="flex-1 relative bg-slate-100"><PatientMap patients={patients} /></div>
-          </div>
+                <div className="lg:col-span-1 h-[450px]">
+                    <PatientWaitingRoom patients={patients} />
+                </div>
+            </div>
+
+            {/* --- MODALS --- */}
+
+            {/* ADVISORY MODAL */}
+            <AnimatePresence>
+                {isAdvisoryOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                            className={`w-full max-w-lg rounded-[2rem] shadow-2xl p-8 relative overflow-hidden ${darkMode ? "bg-slate-900 border border-slate-700" : "bg-white"}`}
+                        >
+                            <div className="absolute top-0 right-0 p-4">
+                                <button onClick={() => setIsAdvisoryOpen(false)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"><X className="w-5 h-5 opacity-50" /></button>
+                            </div>
+                            <div className="mb-6">
+                                <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4">
+                                    <Send className="w-6 h-6" />
+                                </div>
+                                <h3 className={`text-2xl font-black ${darkMode ? "text-white" : "text-slate-900"}`}>Send Advisory</h3>
+                                <p className="text-slate-500 font-medium">Broadcast health tips or alerts to all mothers.</p>
+                            </div>
+
+                            <textarea
+                                value={advisoryText}
+                                onChange={(e) => setAdvisoryText(e.target.value)}
+                                placeholder="Type your message here (e.g. 'Heatwave warning: stay hydrated')..."
+                                className={`w-full h-32 p-4 rounded-xl border outline-none font-medium text-sm resize-none mb-6 transition-all focus:ring-2 focus:ring-indigo-500
+                                ${darkMode ? "bg-slate-800 border-slate-700 text-white placeholder:text-slate-600" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                            />
+
+                            <button
+                                onClick={sendAdvisory}
+                                disabled={sendingAdvisory || !advisoryText.trim()}
+                                className="w-full py-3.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                            >
+                                {sendingAdvisory ? "Sending..." : "Blast Message"} <Send className="w-4 h-4" />
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* CONFIRMATION MODAL */}
+            <AnimatePresence>
+                {confirmModal.isOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[200] bg-red-900/40 backdrop-blur-sm flex items-center justify-center p-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+                            className={`w-full max-w-md rounded-[2.5rem] shadow-2xl p-8 text-center ${darkMode ? "bg-slate-900 border border-red-500/30" : "bg-white"}`}
+                        >
+                            <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+                                <AlertOctagon className="w-8 h-8" />
+                            </div>
+                            <h3 className={`text-2xl font-black mb-2 ${darkMode ? "text-white" : "text-slate-900"}`}>{confirmModal.title}</h3>
+                            <p className="text-slate-500 font-medium mb-8 leading-relaxed">{confirmModal.message}</p>
+
+                            <div className="flex gap-3">
+                                <button onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })} className="flex-1 py-3.5 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
+                                <button onClick={handleConfirmAction} disabled={clearing} className="flex-1 py-3.5 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/30 active:scale-95 transition-transform">
+                                    {clearing ? "Processing..." : "Confirm Action"}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* OTHER MODALS */}
+            {isAddModalOpen && <AddPatientModal onClose={() => setIsAddModalOpen(false)} />}
+
+            {isMapOpen && (
+                <div className="fixed inset-0 z-[150] bg-slate-900/90 backdrop-blur-sm p-4 flex flex-col animate-in zoom-in-95 duration-200">
+                    <div className="flex justify-between items-center mb-4 px-4 text-white">
+                        <h3 className="text-2xl font-black">Cluster Map</h3>
+                        <button onClick={() => setIsMapOpen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20"><X className="w-6 h-6" /></button>
+                    </div>
+                    <div className="flex-1 rounded-3xl overflow-hidden bg-slate-100 relative shadow-2xl border border-white/10">
+                        <PatientMap patients={patients} />
+                    </div>
+                </div>
+            )}
         </div>
-      )}
-    </>
-  );
+    );
 }

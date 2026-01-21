@@ -3,13 +3,14 @@
 import { useState, useEffect, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { 
-  User, Mail, Phone, Lock, Calendar as CalendarIcon, 
-  Activity, Truck, ArrowLeft, Shield, 
-  Loader2, AlertCircle, Eye, EyeOff, ChevronLeft, ChevronRight 
+import {
+  User, Mail, Phone, Lock, Calendar as CalendarIcon,
+  Activity, Truck, ArrowLeft, Shield,
+  Loader2, AlertCircle, Eye, EyeOff, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { AuthService } from "@/features/auth/logic/authService";
 import { motion, AnimatePresence } from "framer-motion";
+import { useTranslation } from "@/hooks/useTranslation";
 
 // --- TYPES ---
 type UserRole = "mother" | "doctor" | "driver";
@@ -51,7 +52,7 @@ const CustomDatePicker = ({ value, onChange, themeColor }: { value: string, onCh
   return (
     <div className="relative w-full" ref={containerRef}>
       {/* Trigger Input */}
-      <div 
+      <div
         onClick={() => setIsOpen(!isOpen)}
         className="cursor-pointer group relative flex items-center bg-slate-950/40 border border-white/5 rounded-xl transition-all duration-300 ring-1 ring-transparent focus-within:ring-pink-500/50 hover:bg-slate-950/60 h-[58px]"
       >
@@ -98,11 +99,11 @@ const CustomDatePicker = ({ value, onChange, themeColor }: { value: string, onCh
               {Array.from({ length: firstDay }).map((_, i) => <div key={`empty-${i}`} />)}
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1;
-                const isSelected = value && 
-                  parseInt(value.split('-')[2]) === day && 
+                const isSelected = value &&
+                  parseInt(value.split('-')[2]) === day &&
                   parseInt(value.split('-')[1]) === currentDate.getMonth() + 1 &&
                   parseInt(value.split('-')[0]) === currentDate.getFullYear();
-                
+
                 return (
                   <button
                     key={day}
@@ -110,8 +111,8 @@ const CustomDatePicker = ({ value, onChange, themeColor }: { value: string, onCh
                     onClick={() => handleDayClick(day)}
                     className={`
                       h-8 w-8 rounded-full text-xs font-medium transition-all
-                      ${isSelected 
-                        ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg shadow-pink-500/30' 
+                      ${isSelected
+                        ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg shadow-pink-500/30'
                         : 'text-slate-300 hover:bg-white/10 hover:text-white'}
                     `}
                   >
@@ -132,9 +133,10 @@ const CustomDatePicker = ({ value, onChange, themeColor }: { value: string, onCh
 function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  
+  const t = useTranslation();
+
   const [role, setRole] = useState<UserRole>("mother");
-  
+
   useEffect(() => {
     const roleParam = searchParams.get("role");
     if (roleParam === "mother" || roleParam === "doctor" || roleParam === "driver") {
@@ -162,21 +164,24 @@ function RegisterContent() {
       bgGradient: "from-pink-500/20 via-rose-500/5 to-transparent",
       ringFocus: "focus-within:ring-pink-500/50",
       btn: "bg-gradient-to-r from-pink-600 to-rose-600 shadow-pink-500/25 text-white",
-      icon: <User className="w-6 h-6 text-white" />
+      icon: <User className="w-6 h-6 text-white" />,
+      label: t.landing.roles.mother.title
     },
     doctor: {
       accent: "text-blue-500",
       bgGradient: "from-blue-500/20 via-cyan-500/5 to-transparent",
       ringFocus: "focus-within:ring-blue-500/50",
       btn: "bg-gradient-to-r from-blue-600 to-cyan-600 shadow-blue-500/25 text-white",
-      icon: <Activity className="w-6 h-6 text-white" />
+      icon: <Activity className="w-6 h-6 text-white" />,
+      label: t.landing.roles.doctor.title
     },
     driver: {
       accent: "text-amber-400",
       bgGradient: "from-amber-500/20 via-yellow-500/5 to-transparent",
       ringFocus: "focus-within:ring-amber-400/50",
       btn: "bg-gradient-to-r from-amber-400 to-yellow-500 shadow-amber-500/25 text-black font-bold",
-      icon: <Truck className="w-6 h-6 text-black" />
+      icon: <Truck className="w-6 h-6 text-black" />,
+      label: t.landing.roles.driver.title
     }
   };
 
@@ -190,11 +195,11 @@ function RegisterContent() {
     setError("");
 
     if (formData.password !== formData.confirmPass) {
-      setError("Passwords do not match.");
+      setError(t.auth.passwordsDoNotMatch);
       return;
     }
     if (formData.password.length < 6) {
-      setError("Password must be at least 6 characters.");
+      setError(t.auth.passwordLength);
       return;
     }
 
@@ -210,13 +215,13 @@ function RegisterContent() {
       };
 
       if (role === 'mother') {
-        if (!formData.dueDate) throw new Error("Due date is required.");
+        if (!formData.dueDate) throw new Error(t.auth.dueDateRequired);
         payload.dueDate = formData.dueDate;
       } else if (role === 'doctor') {
-        if (!formData.license) throw new Error("BMDC Number is required.");
+        if (!formData.license) throw new Error(t.auth.bmdcRequired);
         payload.bmdcNumber = formData.license;
       } else if (role === 'driver') {
-        if (!formData.license) throw new Error("License Number is required.");
+        if (!formData.license) throw new Error(t.auth.licenseRequired);
         payload.licenseNumber = formData.license;
       }
 
@@ -228,8 +233,9 @@ function RegisterContent() {
 
     } catch (err: any) {
       console.error("Registration Error:", err);
+      // Simplify error message for user
       const msg = err.message.replace("Firebase: ", "").replace(" (auth/email-already-in-use).", "");
-      setError(msg || "Registration failed. Please try again.");
+      setError(msg || t.common.error);
     } finally {
       setLoading(false);
     }
@@ -237,20 +243,20 @@ function RegisterContent() {
 
   const getInputConfig = () => {
     const common = [
-      { key: "fullName", label: "Full Name", icon: User, type: "text", ph: "e.g. John Doe" },
-      { key: "email", label: "Email Address", icon: Mail, type: "email", ph: "name@example.com" },
-      { key: "phone", label: "Phone Number", icon: Phone, type: "tel", ph: "017..." },
+      { key: "fullName", label: t.onboarding.basic.fullName, icon: User, type: "text", ph: "e.g. John Doe" },
+      { key: "email", label: t.auth.emailPlaceholder, icon: Mail, type: "email", ph: "name@example.com" },
+      { key: "phone", label: t.onboarding.basic.phone, icon: Phone, type: "tel", ph: "017..." },
     ];
 
     const passwords = [
-      { key: "password", label: "Password", icon: Lock, type: showPassword ? "text" : "password", ph: "••••••" },
-      { key: "confirmPass", label: "Confirm Password", icon: Lock, type: showPassword ? "text" : "password", ph: "••••••" },
+      { key: "password", label: t.auth.passwordPlaceholder, icon: Lock, type: showPassword ? "text" : "password", ph: "••••••" },
+      { key: "confirmPass", label: t.common.confirm + " " + t.auth.passwordPlaceholder, icon: Lock, type: showPassword ? "text" : "password", ph: "••••••" },
     ];
 
     let specific = [];
     if (role === 'mother') {
       // NOTE: Type 'date' here triggers the CustomDatePicker logic in the map below
-      specific.push({ key: "dueDate", label: "Estimated Due Date", icon: CalendarIcon, type: "custom-date", ph: "" });
+      specific.push({ key: "dueDate", label: t.onboarding.pregnancy.edd, icon: CalendarIcon, type: "custom-date", ph: "" });
     } else if (role === 'doctor') {
       specific.push({ key: "license", label: "BMDC Number", icon: Shield, type: "text", ph: "Reg. No (e.g. A-1234)" });
     } else {
@@ -262,18 +268,18 @@ function RegisterContent() {
 
   return (
     <div className="min-h-screen bg-[#020817] text-slate-200 flex flex-col items-center justify-center p-4 relative overflow-hidden selection:bg-white/20">
-      
+
       {/* Backgrounds */}
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none" />
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
-      
-      <motion.div 
+
+      <motion.div
         animate={{ scale: [1, 1.2, 1], opacity: [0.2, 0.4, 0.2], rotate: [0, 45, 0] }}
         transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
         className={`absolute top-[-20%] right-[-10%] w-[800px] h-[800px] rounded-full blur-[120px] bg-gradient-to-bl ${theme[role].bgGradient}`}
       />
-      <motion.div 
-         animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.3, 0.1] }}
+      <motion.div
+        animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.3, 0.1] }}
         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
         className={`absolute bottom-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-[120px] bg-gradient-to-tr ${theme[role].bgGradient}`}
       />
@@ -284,8 +290,8 @@ function RegisterContent() {
 
       <motion.div layout className="w-full max-w-[480px] relative z-10 my-10">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight text-white">Create Account</h1>
-          <p className="text-sm text-slate-400 mt-2">Join Matribandhob AI today</p>
+          <h1 className="text-3xl font-bold tracking-tight text-white">{t.auth.createAccount}</h1>
+          <p className="text-sm text-slate-400 mt-2">{t.auth.joinToday}</p>
         </div>
 
         <div className="flex p-1 mb-6 bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-2xl relative shadow-lg">
@@ -295,8 +301,8 @@ function RegisterContent() {
               type="button"
               onClick={() => { setRole(r); setError(""); }}
               className={`relative flex-1 py-3 text-xs sm:text-sm font-bold capitalize transition-colors duration-300 z-10 
-                ${role === r 
-                  ? (r === 'driver' ? 'text-black' : 'text-white') 
+                ${role === r
+                  ? (r === 'driver' ? 'text-black' : 'text-white')
                   : 'text-slate-500 hover:text-slate-300'
                 }`}
             >
@@ -307,12 +313,12 @@ function RegisterContent() {
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}
-              {r}
+              {theme[r].label}
             </button>
           ))}
         </div>
 
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-slate-900/60 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden"
@@ -321,7 +327,7 @@ function RegisterContent() {
 
           <AnimatePresence>
             {error && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, height: 0, y: -10 }}
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={{ opacity: 0, height: 0 }}
@@ -336,7 +342,7 @@ function RegisterContent() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <AnimatePresence mode="popLayout" initial={false}>
               {getInputConfig().map((field) => (
-                <motion.div 
+                <motion.div
                   key={field.key + role}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -344,7 +350,7 @@ function RegisterContent() {
                   transition={{ duration: 0.25 }}
                 >
                   {field.type === 'custom-date' ? (
-                    <CustomDatePicker 
+                    <CustomDatePicker
                       value={formData.dueDate}
                       onChange={(date) => handleInputChange("dueDate", date)}
                       themeColor="pink"
@@ -354,9 +360,9 @@ function RegisterContent() {
                       <div className="pl-4 text-slate-500 group-focus-within:text-white transition-colors">
                         <field.icon className="w-5 h-5" />
                       </div>
-                      
-                      <input 
-                        type={field.type} 
+
+                      <input
+                        type={field.type}
                         placeholder={field.ph}
                         value={(formData as any)[field.key]}
                         onChange={(e) => handleInputChange(field.key, e.target.value)}
@@ -385,23 +391,23 @@ function RegisterContent() {
               ))}
             </AnimatePresence>
 
-            <motion.button 
+            <motion.button
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.98 }}
-              type="submit" 
+              type="submit"
               disabled={loading}
               className={`w-full py-4 mt-6 rounded-xl font-bold uppercase text-sm tracking-wide transition-all shadow-lg hover:shadow-xl hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${theme[role].btn}`}
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {loading ? "Creating Account..." : "Sign Up"}
+              {loading ? t.auth.creating : t.auth.signUp}
             </motion.button>
           </form>
 
           <div className="mt-8 text-center border-t border-white/5 pt-6">
             <p className="text-slate-500 text-xs">
-              Already have an account? 
+              {t.auth.alreadyHaveAccount}
               <Link href="/login" className={`font-bold hover:underline ml-1.5 ${theme[role].accent} transition-colors`}>
-                Log In
+                {t.auth.logIn}
               </Link>
             </p>
           </div>

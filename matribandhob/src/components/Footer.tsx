@@ -1,45 +1,47 @@
 "use client";
 import Link from "next/link";
-import { 
-  ShieldCheck, Facebook, Twitter, Instagram, Linkedin, 
-  Mail, Phone, MapPin, ArrowRight 
+import {
+  ShieldCheck, Facebook, Twitter, Instagram, Linkedin,
+  Mail, Phone, ArrowRight, Award, FolderCheck
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
+  const t = useTranslation();
 
   const footerLinks = {
     portals: [
-      { name: "Mother Portal", href: "/register?role=mother" },
-      { name: "Doctor Dashboard", href: "/register?role=doctor" },
-      { name: "Ambulance Network", href: "/register?role=driver" },
-      { name: "Admin Login", href: "/login" },
+      { name: t.footer.links.motherPortal, href: "/register?role=mother" },
+      { name: t.footer.links.doctorDashboard, href: "/register?role=doctor" },
+      { name: t.footer.links.ambulanceNetwork, href: "/register?role=driver" },
+      { name: t.footer.links.adminLogin, href: "/login" },
     ],
     company: [
-      { name: "About Us", href: "/about" },
-      { name: "Our Mission", href: "/about#mission" },
-      { name: "Success Stories", href: "/stories" },
-      { name: "Contact Support", href: "/contact" },
+      { name: t.footer.links.aboutUs, href: "/about" },
+      { name: t.footer.links.ourMission, href: "/about#mission" },
+      { name: t.footer.links.successStories, href: "/stories" },
+      { name: t.footer.links.contactSupport, href: "/contact" },
     ],
     legal: [
-      { name: "Privacy Policy", href: "/privacy" },
-      { name: "Terms of Service", href: "/terms" },
-      { name: "Cookie Policy", href: "/cookies" },
-      { name: "HIPAA Compliance", href: "/compliance" },
+      { name: t.footer.links.privacyPolicy, href: "/privacy" },
+      { name: t.footer.links.termsOfService, href: "/terms" },
+      { name: t.footer.links.cookiePolicy, href: "/cookies" },
+      { name: t.footer.links.hipaaCompliance, href: "/compliance" },
     ]
   };
 
   return (
     <footer className="relative bg-[#020817] border-t border-white/5 pt-20 pb-10 overflow-hidden">
-      
+
       {/* Background Glows */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none" />
 
       <div className="max-w-7xl mx-auto px-6 relative z-10">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-12 mb-16">
-          
+
           {/* Brand Column (4 cols) */}
           <div className="lg:col-span-4 space-y-6">
             <Link href="/" className="flex items-center gap-2 group">
@@ -48,9 +50,9 @@ export default function Footer() {
               </div>
               <span className="text-xl font-bold text-white tracking-tight">Matribandhob</span>
             </Link>
-            
+
             <p className="text-slate-400 leading-relaxed text-sm pr-6">
-              Empowering maternal healthcare with AI-driven insights, real-time emergency transport, and seamless doctor-patient connectivity.
+              {t.footer.brandDesc}
             </p>
 
             <div className="flex items-center gap-4 pt-2">
@@ -69,7 +71,7 @@ export default function Footer() {
 
           {/* Links Columns (2 cols each) */}
           <div className="lg:col-span-2">
-            <h4 className="text-white font-semibold mb-6">Portals</h4>
+            <h4 className="text-white font-semibold mb-6">{t.footer.headers.portals}</h4>
             <ul className="space-y-4">
               {footerLinks.portals.map((link) => (
                 <li key={link.name}>
@@ -83,7 +85,7 @@ export default function Footer() {
           </div>
 
           <div className="lg:col-span-2">
-            <h4 className="text-white font-semibold mb-6">Company</h4>
+            <h4 className="text-white font-semibold mb-6">{t.footer.headers.company}</h4>
             <ul className="space-y-4">
               {footerLinks.company.map((link) => (
                 <li key={link.name}>
@@ -98,15 +100,15 @@ export default function Footer() {
 
           {/* Newsletter / Contact (4 cols) */}
           <div className="lg:col-span-4">
-            <h4 className="text-white font-semibold mb-6">Stay Updated</h4>
+            <h4 className="text-white font-semibold mb-6">{t.footer.headers.stayUpdated}</h4>
             <p className="text-sm text-slate-400 mb-4">
-              Subscribe to our newsletter for health tips and platform updates.
+              {t.footer.newsletter.desc}
             </p>
-            
+
             <div className="relative mb-8">
-              <input 
-                type="email" 
-                placeholder="Enter your email" 
+              <input
+                type="email"
+                placeholder={t.footer.newsletter.placeholder}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-sm text-white focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all placeholder:text-slate-600"
               />
               <button className="absolute right-1.5 top-1.5 p-1.5 bg-blue-600 rounded-lg text-white hover:bg-blue-500 transition-colors">
@@ -124,6 +126,16 @@ export default function Footer() {
                 <span>+880 1700-000000</span>
               </div>
             </div>
+
+            {/* CERTIFICATIONS */}
+            <div className="mt-8 pt-8 border-t border-white/5 flex gap-4">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+                <FolderCheck className="w-4 h-4" /> HIPAA Compliant
+              </div>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-wider">
+                <Award className="w-4 h-4" /> MoH Approved
+              </div>
+            </div>
           </div>
 
         </div>
@@ -131,7 +143,7 @@ export default function Footer() {
         {/* Bottom Bar */}
         <div className="border-t border-white/5 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-xs text-slate-500">
-            © {currentYear} Matribandhob AI. All rights reserved.
+            © {currentYear} {t.footer.copyright}
           </p>
           <div className="flex gap-6">
             {footerLinks.legal.map((link) => (

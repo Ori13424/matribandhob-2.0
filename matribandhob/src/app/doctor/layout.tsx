@@ -2,11 +2,11 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { 
-  LayoutDashboard, Users, Calendar, FileText, 
-  Settings, LogOut, Menu, X, Power, Sun, Moon
+import {
+  LayoutDashboard, Users, Calendar, FileText,
+  Settings, LogOut, Menu, X, Power, Sun, Moon, Stethoscope
 } from "lucide-react";
-import { auth, db } from "@/lib/firebase"; 
+import { auth, db } from "@/lib/firebase";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, setDoc, serverTimestamp, onSnapshot, getDoc } from "firebase/firestore";
 import { useTheme } from "@/context/ThemeContext";
@@ -26,7 +26,7 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) { router.push("/login"); return; }
-      
+
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
 
@@ -34,9 +34,9 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
         setIsAuthorized(true);
         const data = userSnap.data();
         setDoctorName(data.fullName || data.name || "Doctor");
-        
+
         const unsub = onSnapshot(userRef, (s) => {
-            if (s.exists()) setIsOnline(s.data().isOnline === true);
+          if (s.exists()) setIsOnline(s.data().isOnline === true);
         });
         return () => unsub();
       } else {
@@ -55,7 +55,7 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
       await setDoc(doc(db, "users", auth.currentUser.uid), {
         isOnline: !isOnline, lastActive: serverTimestamp()
       }, { merge: true });
-    } catch (e) {} 
+    } catch (e) { }
     finally { setLoading(false); }
   };
 
@@ -70,88 +70,110 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
     { name: "My Patients", icon: Users, path: "/doctor/patients" },
     { name: "Appointments", icon: Calendar, path: "/doctor/appointments" },
     { name: "Reports", icon: FileText, path: "/doctor/reports" },
-    { name: "Settings", icon: Settings, path: "/doctor/settings" },
+    { name: "Settings", icon: Settings, path: "/doctor/settings" }
   ];
 
-  if (!isAuthorized) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading Portal...</div>;
+  if (!isAuthorized) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 font-bold animate-pulse">Initializing Medical Portal...</div>;
 
   return (
-    <div className={`min-h-screen flex font-sans transition-colors duration-300 ${darkMode ? "bg-slate-900 text-slate-100" : "bg-slate-50 text-slate-900"}`}>
-      
+    <div className={`min-h-screen flex font-sans transition-colors duration-500 ${darkMode ? "bg-slate-900 text-slate-100" : "bg-[#f4f7fa] text-slate-900"}`}>
+
+      {/* SIDEBAR BACKGROUND OVERLAY (Mobile) */}
+      <div
+        className={`fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm transition-opacity lg:hidden ${isSidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
+        onClick={() => setIsSidebarOpen(false)}
+      />
+
       {/* SIDEBAR */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 border-r transition-transform duration-300 ease-in-out 
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 backdrop-blur-xl border-r transition-transform duration-300 ease-out 
         ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:relative lg:translate-x-0
-        ${darkMode ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
+        ${darkMode ? "bg-slate-900/95 border-slate-800" : "bg-white/80 border-slate-200/60"}`}
       >
-        <div className="h-full flex flex-col">
-          <div className="h-16 flex items-center justify-between px-6 border-b border-slate-200">
-             <span className="font-bold text-lg">Matri-Doctor</span>
-             <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-1 rounded-full hover:bg-slate-100">
-                <X className="w-5 h-5 text-slate-500" />
-             </button>
+        <div className="h-full flex flex-col p-6">
+          {/* LOGO */}
+          <div className="flex items-center gap-3 mb-10 pl-2">
+            <div className="p-2.5 bg-gradient-to-br from-teal-400 to-teal-600 rounded-xl shadow-lg shadow-teal-500/20 text-white">
+              <Stethoscope className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="font-black text-xl tracking-tight leading-none">MatriDoctor</h1>
+              <p className="text-[10px] font-bold text-teal-500 uppercase tracking-widest mt-1">Professional</p>
+            </div>
           </div>
-          <nav className="flex-1 px-4 py-6 space-y-1">
+
+          {/* NAV */}
+          <nav className="flex-1 space-y-2">
             {menuItems.map((item) => (
-                <Link key={item.path} href={item.path} onClick={() => setIsSidebarOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all
-                    ${pathname === item.path ? "bg-teal-500/10 text-teal-500 shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
-                >
-                  <item.icon className="w-5 h-5" /> {item.name}
-                </Link>
+              <Link key={item.path} href={item.path} onClick={() => setIsSidebarOpen(false)}
+                className={`flex items-center gap-4 px-4 py-3.5 rounded-2xl text-sm font-bold transition-all relative overflow-hidden group
+                    ${pathname === item.path
+                    ? "text-teal-600 shadow-lg shadow-teal-500/10 bg-gradient-to-r from-teal-50 to-white dark:from-teal-900/20 dark:to-slate-900"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5"}`}
+              >
+                {pathname === item.path && <div className="absolute left-0 top-0 bottom-0 w-1 bg-teal-500 rounded-full" />}
+                <item.icon className={`w-5 h-5 transition-transform group-hover:scale-110 ${pathname === item.path ? "text-teal-600" : "opacity-70"}`} />
+                {item.name}
+              </Link>
             ))}
           </nav>
-          <div className="p-4 border-t">
-             <button onClick={handleLogout} className="flex items-center gap-3 w-full px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 rounded-xl">
-               <LogOut className="w-5 h-5" /> Sign Out
-             </button>
+
+          {/* USER CARD & LOGOUT */}
+          <div className={`mt-auto p-4 rounded-3xl border ${darkMode ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-100"}`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center text-white font-bold shadow-md">
+                {doctorName[0]}
+              </div>
+              <div className="overflow-hidden">
+                <p className={`text-sm font-bold truncate ${darkMode ? "text-slate-200" : "text-slate-800"}`}>Dr. {doctorName.split(' ')[0]}</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-green-500 animate-pulse" : "bg-slate-400"}`} />
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">{isOnline ? "Online" : "Offline"}</p>
+                </div>
+              </div>
+            </div>
+            <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors border border-transparent hover:border-red-100 dark:hover:border-red-900/30">
+              <LogOut className="w-4 h-4" /> Sign Out
+            </button>
           </div>
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        
-        {/* HEADER (No BG, Floating Controls) */}
-        <header className="h-16 flex items-center justify-between px-6 md:px-8 sticky top-0 z-40 bg-transparent pointer-events-none">
-            
-            {/* Mobile Menu Trigger */}
-            <div className="pointer-events-auto">
-                <button className="lg:hidden p-2 -ml-2 rounded-lg bg-white/80 shadow-sm backdrop-blur md:bg-transparent md:shadow-none" onClick={() => setIsSidebarOpen(true)}>
-                    <Menu className={`w-6 h-6 ${darkMode ? "text-slate-200" : "text-slate-700"}`} />
-                </button>
-            </div>
-            
-            {/* Top Right Controls */}
-            <div className="flex items-center gap-3 md:gap-4 pointer-events-auto">
-                <button onClick={toggleDarkMode} className={`p-2 rounded-full border shadow-sm ${darkMode ? "bg-slate-800 border-slate-700 text-yellow-400" : "bg-white border-slate-200 text-slate-400"}`}>
-                    {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                </button>
 
-                <button 
-                    onClick={handleToggleOnline}
-                    disabled={loading}
-                    className={`flex items-center gap-2 px-3 md:px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-sm active:scale-95
-                    ${isOnline 
-                        ? "bg-green-100 text-green-600 border-green-200" 
-                        : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}
-                >
-                    {loading ? "..." : (
-                        <>
-                            <div className={`w-2 h-2 rounded-full ${isOnline ? "bg-green-500 animate-pulse" : "bg-slate-400"}`} />
-                            <span className="hidden md:inline">{isOnline ? "ONLINE" : "OFFLINE"}</span>
-                            <Power className="w-3 h-3 md:w-4 md:h-4 ml-1" />
-                        </>
-                    )}
-                </button>
-
-                <div className={`hidden md:block text-right px-3 py-1 rounded-xl ${darkMode ? "bg-slate-800/50" : "bg-white/50"}`}>
-                    <p className={`text-sm font-bold ${darkMode ? "text-slate-200" : "text-slate-700"}`}>{doctorName}</p>
-                    <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{isOnline ? "On Duty" : "Away"}</p>
-                </div>
+        {/* TOP BAR */}
+        <header className="h-20 flex items-center justify-between px-6 md:px-10 sticky top-0 z-30 transition-all">
+          <div className="flex items-center gap-4">
+            <button className="lg:hidden p-2.5 rounded-xl bg-white shadow-sm text-slate-600 border border-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700 hover:scale-105 transition-transform" onClick={() => setIsSidebarOpen(true)}>
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold transition-colors ${isOnline ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400" : "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"}`}>
+              <div className={`w-2 h-2 rounded-full ${isOnline ? "bg-green-500" : "bg-slate-400"}`} />
+              {isOnline ? "System Systems Operational" : "Status: Offline"}
             </div>
+          </div>
+
+          <div className="flex items-center gap-3 md:gap-4">
+            <button onClick={toggleDarkMode} className={`p-2.5 rounded-full border transition-all hover:scale-105 active:scale-95 ${darkMode ? "bg-slate-800 border-slate-700 text-yellow-400 shadow-lg shadow-yellow-400/10" : "bg-white border-slate-200 text-slate-400 hover:text-amber-500 shadow-sm"}`}>
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+
+            <button
+              onClick={handleToggleOnline}
+              disabled={loading}
+              className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-full text-xs font-bold transition-all shadow-lg active:scale-95
+                    ${isOnline
+                  ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-green-500/30"
+                  : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700"}`}
+            >
+              <Power className="w-4 h-4" />
+              <span className="hidden md:inline">{isOnline ? "GO OFFLINE" : "GO ONLINE"}</span>
+            </button>
+          </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 md:px-8 pb-8 pt-2">
+        {/* SCROLLABLE VIEW */}
+        <div className="flex-1 overflow-y-auto px-6 md:px-10 pb-10 scroll-smooth">
           {children}
         </div>
       </main>

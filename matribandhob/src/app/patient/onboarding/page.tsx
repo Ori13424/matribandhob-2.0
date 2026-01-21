@@ -1,250 +1,133 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { doc, updateDoc } from "firebase/firestore";
-import { db, auth } from "@/lib/firebase";
-import { 
-  Heart, Calendar, User, Phone, ArrowRight, Shield, Activity, Ruler, 
-  Plus, Trash2, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, 
-  Check, Baby, Pill, Stethoscope
+import {
+  ArrowRight, ArrowLeft, Check, Calendar, Heart,
+  Baby, Activity, ShieldCheck, Droplets, Pill,
+  User, Phone, Ruler
 } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
+import { auth, db } from "@/lib/firebase";
+import { doc, setDoc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { motion, AnimatePresence } from "framer-motion";
+import { useTranslation } from "@/hooks/useTranslation";
+import { useLanguage } from "@/context/LanguageContext"; // Ensure accurate language context if needed
 
-// --- CUSTOM UI COMPONENTS ---
-
-// 1. ULTIMATE DATE PICKER
-const CustomDatePicker = ({ label, value, onChange, error }: any) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [viewDate, setViewDate] = useState(new Date()); 
-  const [mode, setMode] = useState<'day' | 'month' | 'year'>('day');
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const { darkMode, toggleDarkMode } = useTheme();
-
-  useEffect(() => {
-    const handleClickOutside = (event: any) => {
-      if (pickerRef.current && !pickerRef.current.contains(event.target)) setIsOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const daysInMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  const firstDayOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1).getDay();
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  
-  const generateYears = (centerYear: number) => {
-    const start = centerYear - 6;
-    return Array.from({ length: 12 }, (_, i) => start + i);
-  };
-
-  const handleDaySelect = (day: number) => {
-    const newDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day);
-    // Use ISO format to avoid timezone issues (YYYY-MM-DD)
-    const year = newDate.getFullYear();
-    const month = String(newDate.getMonth() + 1).padStart(2, '0');
-    const d = String(day).padStart(2, '0');
-    const isoDate = `${year}-${month}-${d}`;
-    
-    onChange(isoDate);
-    setIsOpen(false);
-  };
-
-  const handleHeaderNav = (delta: number) => {
-    if (mode === 'day') setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + delta, 1));
-    if (mode === 'month') setViewDate(new Date(viewDate.getFullYear() + delta, viewDate.getMonth(), 1));
-    if (mode === 'year') setViewDate(new Date(viewDate.getFullYear() + (delta * 12), viewDate.getMonth(), 1));
-  };
-
-  return (
-    <div className="space-y-1 relative group" ref={pickerRef}>
-      <label className="text-xs font-bold text-gray-500 ml-1 uppercase">{label}</label>
-      <button 
-        onClick={() => { setIsOpen(!isOpen); setMode('day'); }}
-        className={`w-full flex items-center justify-between bg-[#1a0b10] border rounded-xl h-[50px] px-4 text-white transition-all ${
-          error ? 'border-red-500' : isOpen ? 'border-pink-500 shadow-[0_0_15px_rgba(236,72,153,0.3)]' : 'border-gray-700 hover:border-gray-500'
-        }`}
-      >
-        <span className={value ? "text-white" : "text-gray-500 text-sm"}>
-          {value ? new Date(value).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : "Select Date"}
-        </span>
-        <Calendar className={`w-5 h-5 ${value ? 'text-pink-500' : 'text-gray-500'}`} />
-      </button>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div 
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="absolute z-[100] mt-2 w-full bg-[#1a0b10] border border-gray-700 rounded-xl shadow-2xl p-4 overflow-hidden"
-          >
-            <div className="flex justify-between items-center mb-4">
-              <button onClick={(e) => { e.stopPropagation(); handleHeaderNav(-1); }} className="p-1 hover:bg-white/10 rounded-full text-gray-400 hover:text-white">
-                <ChevronLeft className="w-5 h-5"/>
-              </button>
-              <div className="flex gap-2">
-                <button onClick={(e) => { e.stopPropagation(); setMode(mode === 'month' ? 'day' : 'month'); }} className={`text-sm font-bold px-2 py-1 rounded transition-colors ${mode === 'month' ? 'bg-pink-600 text-white' : 'text-white hover:bg-white/10'}`}>{months[viewDate.getMonth()]}</button>
-                <button onClick={(e) => { e.stopPropagation(); setMode(mode === 'year' ? 'day' : 'year'); }} className={`text-sm font-bold px-2 py-1 rounded transition-colors ${mode === 'year' ? 'bg-pink-600 text-white' : 'text-white hover:bg-white/10'}`}>{viewDate.getFullYear()}</button>
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); handleHeaderNav(1); }} className="p-1 hover:bg-white/10 rounded-full text-gray-400 hover:text-white">
-                <ChevronRight className="w-5 h-5"/>
-              </button>
-            </div>
-
-            <div className="h-[220px]">
-                {mode === 'day' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full">
-                        <div className="grid grid-cols-7 gap-1 text-center text-xs mb-2 text-gray-500 font-bold">{['S','M','T','W','T','F','S'].map((d, i) => <div key={i}>{d}</div>)}</div>
-                        <div className="grid grid-cols-7 gap-1 text-center">
-                           {Array.from({ length: firstDayOfMonth(viewDate) }).map((_, i) => <div key={`empty-${i}`} />)}
-                           {Array.from({ length: daysInMonth(viewDate) }).map((_, i) => {
-                             const day = i + 1;
-                             const year = viewDate.getFullYear();
-                             const month = String(viewDate.getMonth() + 1).padStart(2, '0');
-                             const d = String(day).padStart(2, '0');
-                             const currentDate = `${year}-${month}-${d}`;
-                             
-                             return (
-                               <button key={day} onClick={(e) => { e.stopPropagation(); handleDaySelect(day); }} className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium transition-all ${value === currentDate ? 'bg-pink-600 text-white shadow-lg' : 'text-gray-300 hover:bg-white/10'}`}>{day}</button>
-                             );
-                           })}
-                        </div>
-                    </motion.div>
-                )}
-                {mode === 'month' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-3 gap-2 h-full content-start">
-                        {months.map((m, i) => (<button key={m} onClick={(e) => { e.stopPropagation(); setViewDate(new Date(viewDate.getFullYear(), i, 1)); setMode('day'); }} className={`py-3 rounded-lg text-sm font-bold transition-all ${i === viewDate.getMonth() ? 'bg-pink-600 text-white' : 'text-gray-300 hover:bg-white/10'}`}>{m}</button>))}
-                    </motion.div>
-                )}
-                {mode === 'year' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-3 gap-2 h-full content-start">
-                        {generateYears(viewDate.getFullYear()).map((y) => (<button key={y} onClick={(e) => { e.stopPropagation(); setViewDate(new Date(y, viewDate.getMonth(), 1)); setMode('month'); }} className={`py-3 rounded-lg text-sm font-bold transition-all ${y === viewDate.getFullYear() ? 'bg-pink-600 text-white' : 'text-gray-300 hover:bg-white/10'}`}>{y}</button>))}
-                    </motion.div>
-                )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-// 2. CUSTOM SELECT
-const CustomSelect = ({ label, options, value, onChange, placeholder }: any) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const close = (e: any) => { if (containerRef.current && !containerRef.current.contains(e.target)) setIsOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-
-  return (
-    <div className="space-y-1 relative group" ref={containerRef}>
-      <label className="text-xs font-bold text-gray-500 ml-1 uppercase">{label}</label>
-      <button onClick={() => setIsOpen(!isOpen)} className={`w-full flex items-center justify-between bg-[#1a0b10] border rounded-xl h-[50px] px-4 text-white transition-all ${isOpen ? 'border-pink-500 shadow-[0_0_15px_rgba(236,72,153,0.3)]' : 'border-gray-700 hover:border-gray-500'}`}>
-        <span className={value ? "text-white" : "text-gray-500 text-sm"}>{value || placeholder}</span>
-        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="absolute z-[100] mt-1 w-full bg-[#1a0b10] border border-gray-700 rounded-xl shadow-xl max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700">
-            {options.map((opt: string) => (
-              <button key={opt} onClick={() => { onChange(opt); setIsOpen(false); }} className={`w-full text-left px-4 py-3 text-sm hover:bg-pink-900/30 hover:text-pink-400 transition-colors flex items-center justify-between ${value === opt ? 'text-pink-500 font-bold bg-pink-900/10' : 'text-gray-300'}`}>{opt} {value === opt && <Check className="w-4 h-4" />}</button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-// 3. CUSTOM INPUT
-const CustomInput = ({ label, value, onChange, placeholder, type = "text", icon: Icon }: any) => (
-  <div className="space-y-1 relative group">
-    <label className="text-xs font-bold text-gray-500 ml-1 uppercase">{label}</label>
-    <div className="relative">
-      {Icon && <Icon className="absolute left-4 top-3.5 w-5 h-5 text-gray-500 group-focus-within:text-pink-500 transition-colors" />}
-      <input 
-        type={type} 
-        value={value} 
-        onChange={(e) => onChange(e.target.value)} 
-        placeholder={placeholder}
-        className={`w-full bg-[#1a0b10] border border-gray-700 rounded-xl h-[50px] ${Icon ? 'pl-12' : 'pl-4'} pr-4 text-white placeholder-gray-500 text-sm focus:border-pink-500 focus:outline-none transition-all focus:shadow-[0_0_15px_rgba(236,72,153,0.2)]`}
-      />
-    </div>
-  </div>
-);
-
-// 4. CHECKBOX GROUP
-const CheckboxGroup = ({ label, options, selected, onChange }: any) => (
-  <div className="space-y-2">
-    <label className="text-xs font-bold text-gray-500 ml-1 uppercase">{label}</label>
-    <div className="grid grid-cols-2 gap-2">
-      {options.map((opt: string) => (
-        <label key={opt} className={`flex items-center gap-2 p-3 rounded-xl cursor-pointer border transition-all ${selected.includes(opt) ? 'bg-pink-900/20 border-pink-500/50' : 'border-gray-800 hover:bg-white/5'}`}>
-          <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selected.includes(opt) ? 'bg-pink-600 border-pink-600' : 'border-gray-600'}`}>
-            {selected.includes(opt) && <Check className="w-3 h-3 text-white" />}
-          </div>
-          <input 
-            type="checkbox" className="hidden"
-            checked={selected.includes(opt)}
-            onChange={(e) => {
-              if (e.target.checked) onChange([...selected, opt]);
-              else onChange(selected.filter((s: string) => s !== opt));
-            }}
-          />
-          <span className={`text-xs font-bold ${selected.includes(opt) ? 'text-pink-200' : 'text-gray-400'}`}>{opt}</span>
-        </label>
-      ))}
-    </div>
-  </div>
-);
-
-// --- MAIN PAGE ---
-
-type Contact = { id: number; name: string; phone: string; relation: string };
+// --- TYPES ---
+type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
+  const t = useTranslation();
+  const [user, setUser] = useState<any>(null);
+  const [step, setStep] = useState<OnboardingStep>(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  
-  // State
-  const [basicInfo, setBasicInfo] = useState({ fullName: "", phone: "", dob: "", bloodGroup: "", height: "", weight: "" });
-  
-  // --- ADDED LPD TO STATE ---
-  const [pregnancyDetails, setPregnancyDetails] = useState({ 
-    status: "Pregnant", 
-    lmp: "",  // Last Period Date
-    edd: "",  // Expected Due Date
-    type: "First pregnancy", 
-    prevBirths: "0", 
-    miscarriages: "0", 
-    deliveryPlan: "" 
+
+  // --- FORM DATA ---
+  const [formData, setFormData] = useState({
+    // Step 2: Basic
+    fullName: "",
+    phone: "",
+    dob: "",
+    bloodGroup: "",
+    height: "",
+    weight: "",
+
+    // Step 3: Pregnancy Details
+    status: "", // "Pregnant" | "Postpartum"
+    lmp: "",
+    edd: "",
+    type: "Single",
+    prevBirths: "0",
+    miscarriages: "0",
+    deliveryPlan: "",
+
+    // Step 4: Medical History
+    conditions: [] as string[],
+    complications: [] as string[],
+
+    // Step 5: Meds
+    medications: "",
+    supplements: [] as string[],
+    drugAllergies: "",
+    foodAllergies: "",
+
+    // Step 6: Health
+    bp: "",
+    bloodSugar: "",
+    hemoglobin: "",
+    symptoms: [] as string[],
+
+    // Step 7: Contacts
+    contacts: [{ id: 1, name: "", phone: "", relation: "" }]
   });
-  
-  const [medicalHistory, setMedicalHistory] = useState({ conditions: [] as string[], complications: [] as string[] });
-  const [medsAndAllergies, setMedsAndAllergies] = useState({ medications: "", supplements: [] as string[], drugAllergies: "", foodAllergies: "" });
-  const [currentHealth, setCurrentHealth] = useState({ bp: "", bloodSugar: "", hemoglobin: "", symptoms: [] as string[] });
-  const [contacts, setContacts] = useState<Contact[]>([{ id: 1, name: "", phone: "", relation: "" }]);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        const docRef = doc(db, "users", currentUser.uid);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.onboardingComplete) {
+            router.push("/patient/dashboard");
+            return;
+          }
+          // Pre-fill existing data if any
+          setFormData(prev => ({
+            ...prev,
+            fullName: data.basicInfo?.fullName || prev.fullName,
+            phone: data.basicInfo?.phone || prev.phone,
+            dob: data.basicInfo?.dob || prev.dob,
+            bloodGroup: data.basicInfo?.bloodGroup || prev.bloodGroup,
+            height: data.basicInfo?.height || prev.height,
+            weight: data.basicInfo?.weight || prev.weight,
+
+            // Safe fallbacks for nested properties
+            status: data.pregnancyDetails?.status || prev.status,
+            lmp: data.pregnancyDetails?.lmp || prev.lmp,
+            edd: data.pregnancyDetails?.edd || prev.edd,
+            type: data.pregnancyDetails?.type || prev.type,
+            prevBirths: data.pregnancyDetails?.prevBirths || prev.prevBirths,
+            miscarriages: data.pregnancyDetails?.miscarriages || prev.miscarriages,
+            deliveryPlan: data.pregnancyDetails?.deliveryPlan || prev.deliveryPlan,
+
+            conditions: data.medicalHistory?.conditions || prev.conditions,
+            complications: data.medicalHistory?.complications || prev.complications,
+
+            medications: data.medsAndAllergies?.medications || prev.medications,
+            supplements: data.medsAndAllergies?.supplements || prev.supplements,
+            drugAllergies: data.medsAndAllergies?.drugAllergies || prev.drugAllergies,
+            foodAllergies: data.medsAndAllergies?.foodAllergies || prev.foodAllergies,
+
+            bp: data.currentHealth?.bp || prev.bp,
+            bloodSugar: data.currentHealth?.bloodSugar || prev.bloodSugar,
+            hemoglobin: data.currentHealth?.hemoglobin || prev.hemoglobin,
+            symptoms: data.currentHealth?.symptoms || prev.symptoms,
+
+            contacts: data.emergencyContacts?.length > 0 ? data.emergencyContacts.map((c: any, i: number) => ({ id: i + 1, ...c })) : prev.contacts,
+          }));
+        }
+      } else {
+        router.push("/login"); // Secure Route
+      }
+    });
+    return () => unsub();
+  }, [router]);
 
   // Validation
   const validateStep = () => {
-    setError("");
     if (step === 2) {
-      if (!basicInfo.fullName || !basicInfo.phone || !basicInfo.dob || !basicInfo.bloodGroup || !basicInfo.height || !basicInfo.weight) return "Please fill all Basic Information fields.";
+      if (!formData.fullName || !formData.phone || !formData.dob || !formData.bloodGroup || !formData.height || !formData.weight) return t.onboarding.errors.basicInfo;
     }
     if (step === 3) {
-      // Allow either LPD or EDD to be set, but preferably both logic handles it
-      if (!pregnancyDetails.edd && !pregnancyDetails.lmp) return "Please enter Last Period Date (LPD) or Expected Due Date (EDD).";
-      if (!pregnancyDetails.deliveryPlan) return "Please select a Delivery Plan.";
+      if (!formData.edd && !formData.lmp) return t.onboarding.errors.pregnancyDate;
+      if (!formData.deliveryPlan) return t.onboarding.errors.deliveryPlan;
     }
     if (step === 7) {
-      if (contacts.some(c => !c.name || !c.phone || !c.relation)) return "Please complete all Emergency Contact details.";
+      if (formData.contacts.some(c => !c.name || !c.phone || !c.relation)) return t.onboarding.errors.emergencyContacts;
     }
     return null;
   };
@@ -252,131 +135,212 @@ export default function OnboardingPage() {
   const handleNext = () => {
     const err = validateStep();
     if (err) { setError(err); return; }
+    setError("");
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    setStep(prev => prev + 1);
+    if (step < 7) setStep((prev) => (prev + 1) as OnboardingStep);
+    else handleComplete();
   };
 
-  // --- AUTO-CALCULATE EDD FROM LPD ---
+  const handleBack = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (step > 1) setStep((prev) => (prev - 1) as OnboardingStep);
+  };
+
+  const handleChange = (key: string, value: any) => {
+    setFormData(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Special handler for LMP to auto-calc EDD
   const handleLMPChange = (date: string) => {
-    // 1. Set LPD
-    const newState = { ...pregnancyDetails, lmp: date };
-    
-    // 2. Calculate EDD (LMP + 280 days)
+    const newState = { ...formData, lmp: date };
+
+    // Calculate EDD (LMP + 280 days)
     if (date) {
-        const lmpDate = new Date(date);
-        const eddDate = new Date(lmpDate.getTime() + 280 * 24 * 60 * 60 * 1000);
-        
-        // Format to YYYY-MM-DD
-        const year = eddDate.getFullYear();
-        const month = String(eddDate.getMonth() + 1).padStart(2, '0');
-        const d = String(eddDate.getDate()).padStart(2, '0');
-        
-        newState.edd = `${year}-${month}-${d}`;
+      const lmpDate = new Date(date);
+      const eddDate = new Date(lmpDate);
+      eddDate.setDate(lmpDate.getDate() + 280);
+
+      const year = eddDate.getFullYear();
+      const month = String(eddDate.getMonth() + 1).padStart(2, '0');
+      const d = String(eddDate.getDate()).padStart(2, '0');
+
+      newState.edd = `${year}-${month}-${d}`;
+    } else {
+      newState.edd = "";
     }
-    setPregnancyDetails(newState);
+    setFormData(newState);
+  };
+
+  const toggleSelection = (stateKey: "conditions" | "complications" | "supplements" | "symptoms", item: string) => {
+    setFormData(prev => {
+      const list = prev[stateKey];
+      return list.includes(item)
+        ? { ...prev, [stateKey]: list.filter(i => i !== item) }
+        : { ...prev, [stateKey]: [...list, item] };
+    });
+  };
+
+  const handleContactChange = (index: number, field: string, value: string) => {
+    const newContacts: any = [...formData.contacts];
+    newContacts[index][field] = value;
+    setFormData(prev => ({ ...prev, contacts: newContacts }));
+  };
+
+  const addContact = () => {
+    if (formData.contacts.length < 3) {
+      setFormData(prev => ({ ...prev, contacts: [...prev.contacts, { id: prev.contacts.length + 1, name: "", phone: "", relation: "" }] }));
+    }
+  };
+
+  const removeContact = (id: number) => {
+    if (formData.contacts.length > 1) {
+      setFormData(prev => ({ ...prev, contacts: prev.contacts.filter(c => c.id !== id) }));
+    }
   };
 
   const handleComplete = async () => {
-    const err = validateStep();
-    if (err) { setError(err); return; }
-    if (!auth.currentUser) return;
+    if (!user) return;
     setLoading(true);
 
     try {
+      // Calculate gestation week
       let gestationWeek = 1;
-      if (pregnancyDetails.edd) {
-        const eddDate = new Date(pregnancyDetails.edd);
+      if (formData.edd) {
+        const eddDate = new Date(formData.edd);
         const today = new Date();
         const diffTime = eddDate.getTime() - today.getTime();
         const diffWeeks = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 7));
         gestationWeek = Math.max(1, 40 - diffWeeks);
       }
 
-      const userRef = doc(db, "users", auth.currentUser.uid);
-      const primaryContact = contacts[0] || {};
+      const userRef = doc(db, "users", user.uid);
+      const primaryContact = formData.contacts[0] || {};
 
-      await updateDoc(userRef, {
-        basicInfo: { 
-            ...basicInfo, 
-            emergencyContact: primaryContact.phone,
-            lmp: pregnancyDetails.lmp, // Sync LMP
-            edd: pregnancyDetails.edd  // Sync EDD
+      await setDoc(userRef, {
+        basicInfo: {
+          fullName: formData.fullName,
+          phone: formData.phone,
+          dob: formData.dob,
+          bloodGroup: formData.bloodGroup,
+          height: formData.height,
+          weight: formData.weight,
+          emergencyContact: primaryContact.phone,
+          lmp: formData.lmp,
+          edd: formData.edd
         },
-        
-        // Root Level Sync (For easy querying)
-        phone: basicInfo.phone, 
-        emergencyContact: primaryContact.phone,
-        edd: pregnancyDetails.edd,
-        lmp: pregnancyDetails.lmp,
-        
-        emergencyContacts: contacts.map(({ id, ...rest }) => rest), 
 
-        pregnancyDetails: { ...pregnancyDetails, currentWeek: gestationWeek },
-        medicalHistory,
-        medsAndAllergies,
-        currentHealth,
-        
+        // Root Level Sync (For easy querying)
+        phone: formData.phone,
+        fullName: formData.fullName,
+        emergencyContact: primaryContact.phone,
+        edd: formData.edd,
+        lmp: formData.lmp,
+
+        emergencyContacts: formData.contacts.map(({ id, ...rest }) => rest),
+
+        pregnancyDetails: {
+          status: formData.status,
+          lmp: formData.lmp,
+          edd: formData.edd,
+          type: formData.type,
+          prevBirths: formData.prevBirths,
+          miscarriages: formData.miscarriages,
+          deliveryPlan: formData.deliveryPlan,
+          currentWeek: gestationWeek
+        },
+        medicalHistory: {
+          conditions: formData.conditions,
+          complications: formData.complications,
+        },
+        medsAndAllergies: {
+          medications: formData.medications,
+          supplements: formData.supplements,
+          drugAllergies: formData.drugAllergies,
+          foodAllergies: formData.foodAllergies,
+        },
+        currentHealth: {
+          bp: formData.bp,
+          bloodSugar: formData.bloodSugar,
+          hemoglobin: formData.hemoglobin,
+          symptoms: formData.symptoms,
+        },
+
         onboardingComplete: true,
         gestationWeek,
-        stage: pregnancyDetails.status === "Pregnant" ? "pregnancy" : "postpartum"
-      });
+        stage: formData.status === "Pregnant" ? "pregnancy" : "postpartum",
+        updatedAt: new Date(),
+        role: "mother"
+      }, { merge: true });
 
       router.push("/patient/dashboard");
+
     } catch (error) {
       console.error(error);
-      alert("Failed to save profile.");
+      alert(t.onboarding.errors.saveProfile || "Failed to save profile.");
     } finally {
       setLoading(false);
     }
   };
 
+  const stepTitles: any = {
+    1: t.onboarding.steps.welcome,
+    2: t.onboarding.steps.basic,
+    3: t.onboarding.steps.pregnancy,
+    4: t.onboarding.steps.history,
+    5: t.onboarding.steps.meds,
+    6: t.onboarding.steps.health,
+    7: t.onboarding.steps.safety
+  };
+
+  // Safe access to translated lists
+  const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
+  const conditionList = t.onboarding.lists.conditions || [];
+  const complicationList = t.onboarding.lists.complications || [];
+  const supplementList = t.onboarding.lists.vitamins || []; // Mapped vitamins to supplements for now
+  const symptomList = t.onboarding.lists.symptoms || [];
+
+  // Hardcoded for now but can be localized if added to lists
+  const pregnancyTypes = ["Single", "Twins", "Triplets"];
+  const deliveryPlans = ["Hospital", "Clinic", "Home Birth"];
+
   return (
     <div className="min-h-screen bg-[#1a0b10] text-white flex flex-col items-center p-4 font-sans relative overflow-x-hidden">
-      
-      <div className="fixed top-[-20%] right-[-10%] w-[600px] h-[600px] bg-pink-600/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed bottom-[-20%] left-[-10%] w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] pointer-events-none" />
+
+      {/* Background Blobs */}
+      <div className="fixed top-[-20%] right-[-10%] w-[600px] h-[600px] bg-pink-600/20 rounded-full blur-[120px] pointer-events-none"></div>
+      <div className="fixed bottom-[-20%] left-[-10%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[100px] pointer-events-none"></div>
 
       {/* Progress Bar */}
       <div className="w-full max-w-xl sticky top-0 bg-[#1a0b10]/80 backdrop-blur-md pt-6 pb-4 z-[40]">
         <div className="flex justify-between text-[10px] font-bold text-pink-500 uppercase tracking-widest mb-2 px-1">
-          <span>Start</span>
-          <span>Basic</span>
-          <span>Pregnancy</span>
-          <span>Medical</span>
-          <span>Health</span>
-          <span>Safety</span>
+          <span>{t.onboarding.progress.start}</span>
+          <span>{t.onboarding.progress.basic}</span>
+          <span>{t.onboarding.progress.pregnancy}</span>
+          <span>{t.onboarding.progress.medical}</span>
+          <span>{t.onboarding.progress.meds}</span>
+          <span>{t.onboarding.progress.health}</span>
+          <span>{t.onboarding.progress.safety}</span>
         </div>
         <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
           <motion.div className="h-full bg-gradient-to-r from-pink-500 to-rose-500" initial={{ width: "0%" }} animate={{ width: `${((step - 1) / 6) * 100}%` }} transition={{ duration: 0.5 }} />
         </div>
-
-        
       </div>
 
-      <div className="w-full max-w-xl bg-[#2a151b]/90 backdrop-blur-xl border border-pink-500/20 rounded-3xl p-6 md:p-8 shadow-2xl relative z-10 flex flex-col mb-10 min-h-[500px]">
-        
-        {error && (
-          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg flex items-center gap-2 text-red-400 text-sm">
-            <AlertCircle className="w-4 h-4" /> {error}
-          </motion.div>
-        )}
+      <AnimatePresence mode="wait">
+        <div className="w-full max-w-lg mt-8 mb-20 z-10 min-h-[60vh] flex flex-col">
 
-        
-
-        <AnimatePresence mode="wait">
-          
           {/* 1. WELCOME */}
           {step === 1 && (
-            <motion.div key={1} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col items-center text-center justify-center">
+            <motion.div key={1} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="flex-1 flex flex-col items-center justify-center text-center">
               <div className="w-24 h-24 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(236,72,153,0.4)] mb-6 animate-pulse">
                 <Heart className="w-12 h-12 text-white" fill="currentColor" />
               </div>
-              <h1 className="text-4xl font-black mb-3 text-white">Hello, Ma!</h1>
+              <h1 className="text-4xl font-black mb-3 text-white">{t.onboarding.welcome.title}</h1>
               <p className="text-gray-400 mb-8 max-w-xs mx-auto text-sm leading-relaxed">
-                Let's build your health profile to give you personalized care and AI insights.
+                {t.onboarding.welcome.description}
               </p>
               <button onClick={handleNext} className="w-full py-4 bg-pink-600 hover:bg-pink-700 text-white rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-2 group border border-pink-500/50">
-                Start Profile <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform"/>
+                {t.onboarding.welcome.startProfile} <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
             </motion.div>
           )}
@@ -384,17 +348,14 @@ export default function OnboardingPage() {
           {/* 2. BASIC INFO */}
           {step === 2 && (
             <motion.div key={2} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
-              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><User className="w-5 h-5"/> Basic Info</h2>
-              <CustomInput label="Full Name" value={basicInfo.fullName} onChange={(v:string) => setBasicInfo({...basicInfo, fullName: v})} placeholder="Your Name" icon={User} />
-              
-              {/* PHONE NUMBER */}
-              <CustomInput label="Your Phone Number" value={basicInfo.phone} onChange={(v:string) => setBasicInfo({...basicInfo, phone: v})} placeholder="017..." icon={Phone} />
-
-              <CustomDatePicker label="Date of Birth" value={basicInfo.dob} onChange={(v:string) => setBasicInfo({...basicInfo, dob: v})} />
-              <CustomSelect label="Blood Group" placeholder="Select Group" options={['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']} value={basicInfo.bloodGroup} onChange={(v:string) => setBasicInfo({...basicInfo, bloodGroup: v})} />
+              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><User className="w-5 h-5" /> {stepTitles[step]}</h2>
+              <CustomInput label={t.onboarding.basic.fullName} value={formData.fullName} onChange={(v: string) => handleChange('fullName', v)} placeholder={t.onboarding.basic.fullNamePlaceholder} icon={User} />
+              <CustomInput label={t.onboarding.basic.phone} value={formData.phone} onChange={(v: string) => handleChange('phone', v)} placeholder={t.onboarding.basic.phonePlaceholder} icon={Phone} />
+              <CustomDatePicker label={t.onboarding.basic.dob} value={formData.dob} onChange={(v: string) => handleChange('dob', v)} />
+              <CustomSelect label={t.onboarding.basic.bloodGroup} placeholder={t.onboarding.basic.bloodGroupPlaceholder} options={bloodGroups} value={formData.bloodGroup} onChange={(v: string) => handleChange('bloodGroup', v)} />
               <div className="flex gap-4">
-                <div className="flex-1"><CustomInput label="Height (cm)" type="number" value={basicInfo.height} onChange={(v:string) => setBasicInfo({...basicInfo, height: v})} placeholder="160" icon={Ruler} /></div>
-                <div className="flex-1"><CustomInput label="Weight (kg)" type="number" value={basicInfo.weight} onChange={(v:string) => setBasicInfo({...basicInfo, weight: v})} placeholder="65" icon={Activity} /></div>
+                <div className="flex-1"><CustomInput label={t.onboarding.basic.height} type="number" value={formData.height} onChange={(v: string) => handleChange('height', v)} placeholder={t.onboarding.basic.heightPlaceholder} icon={Ruler} /></div>
+                <div className="flex-1"><CustomInput label={t.onboarding.basic.weight} type="number" value={formData.weight} onChange={(v: string) => handleChange('weight', v)} placeholder={t.onboarding.basic.weightPlaceholder} icon={Activity} /></div>
               </div>
             </motion.div>
           )}
@@ -402,51 +363,50 @@ export default function OnboardingPage() {
           {/* 3. PREGNANCY DETAILS */}
           {step === 3 && (
             <motion.div key={3} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
-              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Baby className="w-5 h-5"/> Pregnancy Details</h2>
+              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Baby className="w-5 h-5" /> {stepTitles[step]}</h2>
               <div className="flex bg-[#1a0b10] p-1 rounded-xl border border-gray-700">
-                 {['Pregnant', 'Postpartum'].map(s => (
-                   <button key={s} onClick={() => setPregnancyDetails({...pregnancyDetails, status: s})} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${pregnancyDetails.status === s ? 'bg-pink-600 text-white' : 'text-gray-400'}`}>{s}</button>
-                 ))}
+                {[t.onboarding.lists.status.pregnant, t.onboarding.lists.status.postpartum].map(s => (
+                  <button key={s} onClick={() => handleChange('status', s === t.onboarding.lists.status.pregnant ? 'Pregnant' : 'Postpartum')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${formData.status === (s === t.onboarding.lists.status.pregnant ? 'Pregnant' : 'Postpartum') ? 'bg-pink-600 text-white' : 'text-gray-400'}`}>{s}</button>
+                ))}
               </div>
-              
-              {/* --- ADDED LPD (Last Period Date) & Auto-Calculation --- */}
-              <CustomDatePicker 
-                label="Last Period Date (LPD)" 
-                value={pregnancyDetails.lmp} 
-                onChange={handleLMPChange} 
-              />
-              
-              <CustomDatePicker 
-                label="Expected Due Date (EDD)" 
-                value={pregnancyDetails.edd} 
-                onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, edd: v})} 
+
+              <CustomDatePicker
+                label={t.onboarding.pregnancy.lmp}
+                value={formData.lmp}
+                onChange={handleLMPChange}
               />
 
-              <CustomSelect label="Pregnancy Type" options={["First pregnancy", "Second pregnancy", "Third+ pregnancy"]} value={pregnancyDetails.type} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, type: v})} />
+              <CustomDatePicker
+                label={t.onboarding.pregnancy.edd}
+                value={formData.edd}
+                onChange={(v: string) => handleChange('edd', v)}
+              />
+
+              <CustomSelect label={t.onboarding.pregnancy.type} options={pregnancyTypes} value={formData.type} onChange={(v: string) => handleChange('type', v)} />
               <div className="flex gap-4">
-                 <div className="flex-1"><CustomInput label="Prev Births" type="number" value={pregnancyDetails.prevBirths} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, prevBirths: v})} placeholder="0" /></div>
-                 <div className="flex-1"><CustomInput label="Miscarriages" type="number" value={pregnancyDetails.miscarriages} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, miscarriages: v})} placeholder="0" /></div>
+                <div className="flex-1"><CustomInput label={t.onboarding.pregnancy.prevBirths} type="number" value={formData.prevBirths} onChange={(v: string) => handleChange('prevBirths', v)} placeholder="0" /></div>
+                <div className="flex-1"><CustomInput label={t.onboarding.pregnancy.miscarriages} type="number" value={formData.miscarriages} onChange={(v: string) => handleChange('miscarriages', v)} placeholder="0" /></div>
               </div>
-              <CustomSelect label="Delivery Plan" placeholder="Select Plan" options={["Hospital", "Clinic", "Home Birth"]} value={pregnancyDetails.deliveryPlan} onChange={(v:string) => setPregnancyDetails({...pregnancyDetails, deliveryPlan: v})} />
+              <CustomSelect label={t.onboarding.pregnancy.deliveryPlan} placeholder={t.onboarding.pregnancy.deliveryPlanPlaceholder} options={deliveryPlans} value={formData.deliveryPlan} onChange={(v: string) => handleChange('deliveryPlan', v)} />
             </motion.div>
           )}
 
           {/* 4. MEDICAL HISTORY */}
           {step === 4 && (
             <motion.div key={4} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
-              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Activity className="w-5 h-5"/> Medical History</h2>
-              <CheckboxGroup 
-                label="Pre-existing Conditions" 
-                options={["Diabetes", "High BP", "Thyroid", "Asthma", "Heart Disease", "PCOS", "None"]} 
-                selected={medicalHistory.conditions} 
-                onChange={(v:string[]) => setMedicalHistory({...medicalHistory, conditions: v})} 
+              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Activity className="w-5 h-5" /> {stepTitles[step]}</h2>
+              <CheckboxGroup
+                label={t.onboarding.history.conditions}
+                options={conditionList}
+                selected={formData.conditions}
+                onChange={(v: string[]) => handleChange('conditions', v)}
               />
               <div className="h-px bg-white/5 my-2"></div>
-              <CheckboxGroup 
-                label="Past Complications" 
-                options={["Gestational Diabetes", "Pre-eclampsia", "Excessive Bleeding", "C-Section History", "Preterm Birth", "None"]} 
-                selected={medicalHistory.complications} 
-                onChange={(v:string[]) => setMedicalHistory({...medicalHistory, complications: v})} 
+              <CheckboxGroup
+                label={t.onboarding.history.complications}
+                options={complicationList}
+                selected={formData.complications}
+                onChange={(v: string[]) => handleChange('complications', v)}
               />
             </motion.div>
           )}
@@ -454,34 +414,34 @@ export default function OnboardingPage() {
           {/* 5. MEDS & ALLERGIES */}
           {step === 5 && (
             <motion.div key={5} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
-              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Pill className="w-5 h-5"/> Meds & Allergies</h2>
-              <CustomInput label="Current Medications" placeholder="e.g. Insulin..." value={medsAndAllergies.medications} onChange={(v:string) => setMedsAndAllergies({...medsAndAllergies, medications: v})} />
-              <CheckboxGroup 
-                label="Vitamin Supplements" 
-                options={["Iron", "Folic Acid", "Calcium", "Vitamin D", "Multivitamin"]} 
-                selected={medsAndAllergies.supplements} 
-                onChange={(v:string[]) => setMedsAndAllergies({...medsAndAllergies, supplements: v})} 
+              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Pill className="w-5 h-5" /> {stepTitles[step]}</h2>
+              <CustomInput label={t.onboarding.meds.currentMeds} placeholder={t.onboarding.meds.medsPlaceholder} value={formData.medications} onChange={(v: string) => handleChange('medications', v)} />
+              <CheckboxGroup
+                label={t.onboarding.meds.vitamins}
+                options={supplementList}
+                selected={formData.supplements}
+                onChange={(v: string[]) => handleChange('supplements', v)}
               />
-              <CustomInput label="Drug Allergies" placeholder="e.g. Penicillin (Optional)" value={medsAndAllergies.drugAllergies} onChange={(v:string) => setMedsAndAllergies({...medsAndAllergies, drugAllergies: v})} />
-              <CustomInput label="Food Allergies" placeholder="e.g. Peanuts (Optional)" value={medsAndAllergies.foodAllergies} onChange={(v:string) => setMedsAndAllergies({...medsAndAllergies, foodAllergies: v})} />
+              <CustomInput label={t.onboarding.meds.allergies} placeholder={t.onboarding.meds.allergiesPlaceholder} value={formData.drugAllergies} onChange={(v: string) => handleChange('drugAllergies', v)} />
             </motion.div>
           )}
 
-          {/* 6. HEALTH STATUS */}
+          {/* 6. CURRENT HEALTH */}
           {step === 6 && (
             <motion.div key={6} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
-              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Stethoscope className="w-5 h-5"/> Current Status</h2>
+              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Droplets className="w-5 h-5" /> {stepTitles[step]}</h2>
               <div className="flex gap-4">
-                 <div className="flex-1"><CustomInput label="BP (mmHg)" placeholder="120/80" value={currentHealth.bp} onChange={(v:string) => setCurrentHealth({...currentHealth, bp: v})} /></div>
-                 <div className="flex-1"><CustomInput label="Sugar (mmol/L)" placeholder="5.6" value={currentHealth.bloodSugar} onChange={(v:string) => setCurrentHealth({...currentHealth, bloodSugar: v})} /></div>
+                <div className="flex-1"><CustomInput label={t.onboarding.health.systolic} placeholder="120/80" value={formData.bp} onChange={(v: string) => handleChange('bp', v)} /></div>
+                <div className="flex-1"><CustomInput label={t.onboarding.health.sugar} placeholder="mg/dL" type="number" value={formData.bloodSugar} onChange={(v: string) => handleChange('bloodSugar', v)} /></div>
               </div>
-              <CustomInput label="Hemoglobin (Hb)" placeholder="12 g/dL" value={currentHealth.hemoglobin} onChange={(v:string) => setCurrentHealth({...currentHealth, hemoglobin: v})} />
+              <CustomInput label={t.onboarding.health.hemoglobin} placeholder="g/dL" type="number" value={formData.hemoglobin} onChange={(v: string) => handleChange('hemoglobin', v)} />
+
               <div className="h-px bg-white/5 my-2"></div>
-              <CheckboxGroup 
-                label="Current Symptoms" 
-                options={["Severe Headache", "Swelling", "Bleeding", "Dizziness", "Shortness of Breath", "Nausea", "None"]} 
-                selected={currentHealth.symptoms} 
-                onChange={(v:string[]) => setCurrentHealth({...currentHealth, symptoms: v})} 
+              <CheckboxGroup
+                label={t.onboarding.health.symptoms}
+                options={symptomList}
+                selected={formData.symptoms}
+                onChange={(v: string[]) => handleChange('symptoms', v)}
               />
             </motion.div>
           )}
@@ -489,48 +449,128 @@ export default function OnboardingPage() {
           {/* 7. SAFETY NET */}
           {step === 7 && (
             <motion.div key={7} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="flex-1 flex flex-col space-y-5">
-              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><Shield className="w-5 h-5"/> Safety Net</h2>
-              <p className="text-sm text-gray-400 mb-2">Emergency contacts for SOS alerts.</p>
-              
-              <div className="space-y-3">
-                {contacts.map((contact, index) => (
-                   <div key={contact.id} className="bg-[#1a0b10] border border-gray-700 rounded-xl p-4 relative">
-                      <div className="flex justify-between items-center mb-2">
-                         <span className="text-[10px] font-bold text-pink-500 uppercase">Contact #{index + 1}</span>
-                         {contacts.length > 1 && (<button onClick={() => setContacts(contacts.filter(c => c.id !== contact.id))} className="text-gray-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>)}
-                      </div>
-                      <div className="space-y-3">
-                         <CustomInput placeholder="Name" value={contact.name} onChange={(v:string) => setContacts(contacts.map(c => c.id === contact.id ? { ...c, name: v } : c))} icon={User} />
-                         <CustomInput placeholder="Phone" value={contact.phone} onChange={(v:string) => setContacts(contacts.map(c => c.id === contact.id ? { ...c, phone: v } : c))} icon={Phone} />
-                         <CustomSelect placeholder="Relation" options={["Husband", "Mother", "Father", "Sister", "Guardian"]} value={contact.relation} onChange={(v:string) => setContacts(contacts.map(c => c.id === contact.id ? { ...c, relation: v } : c))} />
-                      </div>
-                   </div>
-                ))}
-                {contacts.length < 3 && (
-                  <button onClick={() => setContacts([...contacts, { id: Date.now(), name: "", phone: "", relation: "" }])} className="w-full py-3 border-2 border-dashed border-gray-700 rounded-xl text-gray-400 font-bold hover:border-pink-500 hover:text-pink-500 transition-all flex items-center justify-center gap-2">
-                    <Plus className="w-4 h-4" /> Add Contact
-                  </button>
-                )}
-              </div>
+              <h2 className="text-xl font-bold mb-2 text-pink-400 flex items-center gap-2"><ShieldCheck className="w-5 h-5" /> {stepTitles[step]}</h2>
+              <p className="text-xs text-gray-500 mb-2">{t.onboarding.safety.subtitle}</p>
+
+              {formData.contacts.map((contact, index) => (
+                <div key={contact.id} className="p-4 bg-white/5 rounded-xl border border-white/10 relative">
+                  <h4 className="text-xs font-bold text-gray-400 uppercase mb-3">{t.onboarding.safety.contact} {index + 1}</h4>
+                  <div className="space-y-3">
+                    <CustomInput label={t.onboarding.safety.contactName} placeholder={t.onboarding.safety.contactName} value={contact.name} onChange={(v: string) => handleContactChange(index, 'name', v)} />
+                    <CustomInput label={t.onboarding.safety.contactPhone} placeholder={t.onboarding.safety.contactPhone} value={contact.phone} onChange={(v: string) => handleContactChange(index, 'phone', v)} icon={Phone} />
+                    <CustomSelect label={t.onboarding.safety.relation} placeholder={t.onboarding.safety.selectRelation} options={['Husband', 'Mother', 'Sister', 'Guardian']} value={contact.relation} onChange={(v: string) => handleContactChange(index, 'relation', v)} />
+                  </div>
+                  {index > 0 && (
+                    <button onClick={() => removeContact(contact.id)} className="absolute top-2 right-2 text-red-400 text-xs hover:text-red-300">Remove</button>
+                  )}
+                </div>
+              ))}
+
+              {formData.contacts.length < 3 && (
+                <button onClick={addContact} className="w-full py-3 border border-dashed border-gray-600 rounded-xl text-gray-400 text-sm hover:border-pink-500 hover:text-pink-500 transition-colors">
+                  + {t.onboarding.safety.addAnother}
+                </button>
+              )}
             </motion.div>
           )}
 
-        </AnimatePresence>
-
-        {/* Navigation Buttons */}
-        {step > 1 && (
-          <div className="mt-8 pt-6 border-t border-white/5 flex gap-3">
-            <button onClick={() => setStep(step - 1)} className="px-6 py-3 rounded-xl font-bold text-gray-400 hover:text-white hover:bg-white/5">Back</button>
-            <button 
-              onClick={step === 7 ? handleComplete : handleNext} 
-              disabled={loading}
-              className="flex-1 py-3 bg-gradient-to-r from-pink-600 to-rose-600 text-white rounded-xl font-bold shadow-lg flex justify-center items-center gap-2 hover:scale-[1.02] transition-all"
-            >
-               {loading ? "Saving..." : step === 7 ? "Complete Setup" : "Next Step"}
-            </button>
+          {/* NAVIGATION */}
+          <div className="mt-8 flex gap-4">
+            {step > 1 && (
+              <button onClick={handleBack} className="flex-1 py-4 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-all border border-white/10">
+                {t.onboarding.buttons.back}
+              </button>
+            )}
+            {step > 1 && (
+              <button onClick={handleNext} className="flex-[2] py-4 bg-pink-600 hover:bg-pink-700 text-white rounded-xl font-bold shadow-lg shadow-pink-600/30 transition-all flex items-center justify-center gap-2">
+                {loading ? <Activity className="w-5 h-5 animate-spin" /> : (step === 7 ? t.onboarding.buttons.finish : t.onboarding.buttons.next)}
+              </button>
+            )}
           </div>
-        )}
-      </div>
+
+          {error && <p className="text-red-400 text-center mt-4 text-sm font-bold animate-pulse">{error}</p>}
+
+        </div>
+      </AnimatePresence>
     </div>
   );
 }
+
+// --- SUB COMPONENTS ---
+
+const CustomInput = ({ label, value, onChange, placeholder, type = "text", icon: Icon }: any) => (
+  <div className="space-y-1.5">
+    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">{label}</label>
+    <div className="relative group">
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-[#120a10] border border-gray-800 rounded-xl py-4 px-4 pl-4 text-white placeholder:text-gray-700 outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition-all"
+      />
+      {Icon && <Icon className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-600 group-focus-within:text-pink-500 transition-colors" />}
+    </div>
+  </div>
+);
+
+const CustomSelect = ({ label, value, onChange, options, placeholder }: any) => (
+  <div className="space-y-1.5">
+    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">{label}</label>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-[#120a10] border border-gray-800 rounded-xl py-4 px-4 text-white outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 appearance-none transition-all"
+      >
+        <option value="" disabled>{placeholder}</option>
+        {options.map((opt: string) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">▼</div>
+    </div>
+  </div>
+);
+
+const CustomDatePicker = ({ label, value, onChange }: any) => (
+  <div className="space-y-1.5">
+    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">{label}</label>
+    <div className="relative">
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-[#120a10] border border-gray-800 rounded-xl py-4 px-4 text-white outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 appearance-none transition-all [color-scheme:dark]"
+      />
+      <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-600 pointer-events-none" />
+    </div>
+  </div>
+);
+
+const CheckboxGroup = ({ label, options, selected, onChange }: any) => {
+  const toggle = (opt: string) => {
+    if (selected.includes(opt)) onChange(selected.filter((s: string) => s !== opt));
+    else onChange([...selected, opt]);
+  };
+  return (
+    <div className="space-y-2">
+      <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">{label}</label>
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt: string) => (
+          <button
+            key={opt}
+            onClick={() => toggle(opt)}
+            className={`px-4 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2
+                        ${selected.includes(opt)
+                ? 'bg-pink-600 border-pink-600 text-white shadow-lg shadow-pink-600/20'
+                : 'bg-white/5 border-white/10 text-gray-400 hover:border-pink-500/50'}`}
+          >
+            {selected.includes(opt) && <Check className="w-3 h-3" />}
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};

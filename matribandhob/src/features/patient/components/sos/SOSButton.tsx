@@ -4,14 +4,16 @@ import { motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, MapPin } from "lucide-react";
 import { addDoc, collection, serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { sendSOSNotification } from "@/app/sos";
+import { sendSOSNotification, dispatchDriver } from "@/app/sos";
 
 export default function SOSButton({ user, contacts, onTrigger }: any) {
+  // ... (keep existing lines up to line 172) ...
+
   const [status, setStatus] = useState<'idle' | 'counting' | 'sending' | 'sent'>('idle');
   const [count, setCount] = useState(5);
-  
+
   // Store the live location locally
-  const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number, lng: number, accuracy: number } | null>(null);
   const [activeAlertId, setActiveAlertId] = useState<string | null>(null);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -28,13 +30,13 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
     if (navigator.geolocation) {
       watchIdRef.current = navigator.geolocation.watchPosition(
         (position) => {
-          const { latitude, longitude } = position.coords;
+          const { latitude, longitude, accuracy } = position.coords;
           // Update local state
-          setCurrentLocation({ lat: latitude, lng: longitude });
+          setCurrentLocation({ lat: latitude, lng: longitude, accuracy });
 
           // If an alert is ALREADY active, update the DB in real-time (Live Tracking)
           if (activeAlertId) {
-            updateLiveLocation(activeAlertId, latitude, longitude);
+            updateLiveLocation(activeAlertId, latitude, longitude, accuracy);
           }
         },
         (error) => console.error("GPS Watch Error:", error),
@@ -48,45 +50,46 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
   }, [activeAlertId]); // Re-run if activeAlertId changes so the closure captures it
 
   // Helper to push live updates to Firestore
-  const updateLiveLocation = async (alertId: string, lat: number, lng: number) => {
+  const updateLiveLocation = async (alertId: string, lat: number, lng: number, accuracy: number) => {
     try {
       const alertRef = doc(db, "alerts", alertId);
       await updateDoc(alertRef, {
-        location: { lat, lng },
+        location: { lat, lng, accuracy },
         googleMapsLink: `http://maps.google.com/?q=${lat},${lng}`,
         lastUpdate: serverTimestamp()
       });
       // Also update user profile for redundancy
       if (user?.uid) {
-         await updateDoc(doc(db, "users", user.uid), {
-            lastKnownLocation: { lat, lng }
-         });
+        await updateDoc(doc(db, "users", user.uid), {
+          lastKnownLocation: { lat, lng, accuracy }
+        });
       }
     } catch (e) {
       console.error("Live update failed", e);
     }
   };
 
+  // ... (keep audio helpers) ...
   const playSiren = () => {
     if (sirenRef.current) {
-        sirenRef.current.currentTime = 0;
-        sirenRef.current.play().catch(e => console.log("Audio play failed:", e));
+      sirenRef.current.currentTime = 0;
+      sirenRef.current.play().catch(e => console.log("Audio play failed:", e));
     }
   };
 
   const stopSiren = () => {
     if (sirenRef.current) {
-        sirenRef.current.pause();
-        sirenRef.current.currentTime = 0;
+      sirenRef.current.pause();
+      sirenRef.current.currentTime = 0;
     }
   };
 
-  // --- 2. SOS INTERACTION LOGIC ---
+  // ... (keep startSOS/cancelSOS) ...
   const startSOS = () => {
     if (status !== 'idle') return;
     setStatus('counting');
     setCount(5);
-    
+
     intervalRef.current = setInterval(() => {
       setCount((prev) => {
         if (prev <= 1) {
@@ -101,8 +104,8 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
   const cancelSOS = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (status === 'counting') {
-        setStatus('idle');
-        setCount(5);
+      setStatus('idle');
+      setCount(5);
     }
   };
 
@@ -118,19 +121,21 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
       // If still null (rare, unless GPS is broken), try one last force fetch.
       let finalLat = currentLocation?.lat || 0;
       let finalLng = currentLocation?.lng || 0;
+      let finalAcc = currentLocation?.accuracy || 0;
 
       if (finalLat === 0) {
-         // Fallback: One desperate attempt to get location if watch failed
-         try {
-             const pos: any = await new Promise((resolve, reject) => {
-                 navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy: true, timeout: 3000});
-             });
-             finalLat = pos.coords.latitude;
-             finalLng = pos.coords.longitude;
-             setCurrentLocation({ lat: finalLat, lng: finalLng });
-         } catch (e) {
-             console.warn("Could not fetch fallback location");
-         }
+        // Fallback: One desperate attempt to get location if watch failed
+        try {
+          const pos: any = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 3000 });
+          });
+          finalLat = pos.coords.latitude;
+          finalLng = pos.coords.longitude;
+          finalAcc = pos.coords.accuracy;
+          setCurrentLocation({ lat: finalLat, lng: finalLng, accuracy: finalAcc });
+        } catch (e) {
+          console.warn("Could not fetch fallback location");
+        }
       }
 
       const mapsLink = `http://maps.google.com/?q=${finalLat},${finalLng}`;
@@ -146,7 +151,7 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
         priority: "CRITICAL",
         status: "OPEN",
         timestamp: serverTimestamp(),
-        location: { lat: finalLat, lng: finalLng }, // Initial Location
+        location: { lat: finalLat, lng: finalLng, accuracy: finalAcc }, // Initial Location
         googleMapsLink: mapsLink,
         notifiedContacts: contacts || [],
         deviceInfo: navigator.userAgent || "Unknown Device"
@@ -157,20 +162,28 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
 
       if (user?.uid) {
         await updateDoc(doc(db, "users", user.uid), {
-            sosTriggered: true, 
-            lastKnownLocation: { lat: finalLat, lng: finalLng },
-            lastEmergencyTime: serverTimestamp()
+          sosTriggered: true,
+          lastKnownLocation: { lat: finalLat, lng: finalLng, accuracy: finalAcc },
+          lastEmergencyTime: serverTimestamp()
         });
       }
-      
+
       // Send Twilio SMS (Server Action)
       if (contacts && contacts.length > 0) {
-         sendSOSNotification(
-            contacts, 
-            { name: patientName, phone: patientPhone }, 
-            mapsLink
-         );
+        sendSOSNotification(
+          contacts,
+          { name: patientName, phone: patientPhone },
+          mapsLink
+        );
       }
+
+      // Dispatch Driver
+      dispatchDriver(docRef.id, finalLat, finalLng, patientName).then((res: any) => {
+        if (res.success) {
+          console.log("Driver dispatched:", res.driver);
+        }
+      });
+
 
       setStatus('sent');
       if (onTrigger) onTrigger();
@@ -178,18 +191,18 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
     } catch (error) {
       console.error("SOS Failure:", error);
       alert("Network Warning: Check internet. Siren is active.");
-      setStatus('sent'); 
+      setStatus('sent');
     }
   };
 
   const resetSOS = async () => {
     stopSiren();
     setActiveAlertId(null); // Stop live DB updates
-    
+
     if (user?.uid) {
-        try {
-            await updateDoc(doc(db, "users", user.uid), { sosTriggered: false });
-        } catch (e) { console.error("Reset failed", e); }
+      try {
+        await updateDoc(doc(db, "users", user.uid), { sosTriggered: false });
+      } catch (e) { console.error("Reset failed", e); }
     }
     setStatus('idle');
     setCount(5);
@@ -213,39 +226,39 @@ export default function SOSButton({ user, contacts, onTrigger }: any) {
           className="w-64 h-64 rounded-full bg-gradient-to-br from-red-500 via-red-600 to-rose-700 shadow-[0_0_60px_rgba(225,29,72,0.4)] flex flex-col items-center justify-center border-8 border-white/30 relative overflow-hidden group select-none"
         >
           <div className="relative z-10 flex flex-col items-center">
-             <AlertTriangle className="w-24 h-24 text-white mb-2" />
-             <span className="text-4xl font-black text-white tracking-[0.2em]">SOS</span>
-             <span className="text-xs text-white/90 font-bold uppercase mt-3 bg-black/20 px-3 py-1 rounded-full">Hold 5s</span>
+            <AlertTriangle className="w-24 h-24 text-white mb-2" />
+            <span className="text-4xl font-black text-white tracking-[0.2em]">SOS</span>
+            <span className="text-xs text-white/90 font-bold uppercase mt-3 bg-black/20 px-3 py-1 rounded-full">Hold 5s</span>
           </div>
         </motion.button>
       )}
 
       {status === 'counting' && (
         <div className="flex flex-col items-center">
-            <div className="w-64 h-64 rounded-full bg-red-600 flex items-center justify-center border-8 border-white">
-                <span className="text-8xl font-black text-white">{count}</span>
-            </div>
-            <p className="mt-8 text-red-500 font-black animate-pulse text-xl">HOLDING...</p>
+          <div className="w-64 h-64 rounded-full bg-red-600 flex items-center justify-center border-8 border-white">
+            <span className="text-8xl font-black text-white">{count}</span>
+          </div>
+          <p className="mt-8 text-red-500 font-black animate-pulse text-xl">HOLDING...</p>
         </div>
       )}
 
       {status === 'sending' && (
         <div className="w-64 h-64 rounded-full bg-gradient-to-tr from-red-600 to-pink-600 flex flex-col items-center justify-center border-8 border-white/20">
-            <Loader2 className="w-20 h-20 text-white animate-spin mb-4" />
-            <span className="text-white font-bold tracking-widest">SENDING...</span>
+          <Loader2 className="w-20 h-20 text-white animate-spin mb-4" />
+          <span className="text-white font-bold tracking-widest">SENDING...</span>
         </div>
       )}
 
       {status === 'sent' && (
         <div className="flex flex-col items-center animate-in zoom-in duration-300">
-             <div className="w-64 h-64 rounded-full bg-green-500 flex flex-col items-center justify-center border-8 border-white shadow-2xl">
-                <CheckCircle2 className="w-24 h-24 text-white mb-3" />
-                <span className="text-white font-black text-2xl tracking-widest">SENT!</span>
-            </div>
-            <p className="mt-6 text-center text-slate-500 font-bold animate-pulse">Siren Active • Live Tracking On</p>
-            <button onClick={resetSOS} className="mt-6 px-8 py-3 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold flex items-center gap-2 transition-colors">
-                <RefreshCw className="w-4 h-4" /> Stop Siren & Reset
-            </button>
+          <div className="w-64 h-64 rounded-full bg-green-500 flex flex-col items-center justify-center border-8 border-white shadow-2xl">
+            <CheckCircle2 className="w-24 h-24 text-white mb-3" />
+            <span className="text-white font-black text-2xl tracking-widest">SENT!</span>
+          </div>
+          <p className="mt-6 text-center text-slate-500 font-bold animate-pulse">Siren Active • Live Tracking On</p>
+          <button onClick={resetSOS} className="mt-6 px-8 py-3 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold flex items-center gap-2 transition-colors">
+            <RefreshCw className="w-4 h-4" /> Stop Siren & Reset
+          </button>
         </div>
       )}
     </div>
